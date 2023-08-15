@@ -1,0 +1,19 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    ast (2.4.2)
+    parser (3.2.2.3)
+      ast (~> 2.4.1)
+      racc
+    racc (1.7.1)
+    yarp (0.7.0)
+
+PLATFORMS
+  arm64-darwin-22
+
+DEPENDENCIES
+  parser
+  yarp
+
+BUNDLED WITH
+   2.4.12
