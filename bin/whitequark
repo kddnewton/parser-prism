@@ -58,7 +58,13 @@ if ARGV[0].nil?
     "endless_method_command_syntax.txt",
 
     # Annoying escaped newlines in heredocs thing.
-    "ruby_bug_11989.txt"
+    "ruby_bug_11989.txt",
+
+    # Bugs.
+    "ruby_bug_12402.txt",
+    "masgn_nested.txt",
+    "masgn_splat.txt",
+    "parser_slash_slash_n_escaping_in_literals.txt"
   ]
 
   filepaths.each do |filepath|

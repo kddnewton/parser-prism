@@ -3,4 +3,4 @@
 source "https://rubygems.org"
 
 gem "parser"
-gem "yarp"
+gem "yarp", "~> 0.8"

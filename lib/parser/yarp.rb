@@ -25,6 +25,10 @@ module Parser
         s(:and, [visit(node.left), visit(node.right)])
       end
 
+      def visit_and_write_node(node)
+        s(:and_asgn, [visit(node.target), visit(node.value)])
+      end
+
       def visit_array_node(node)
         s(:array, visit_all(node.elements))
       end
@@ -110,7 +114,7 @@ module Parser
       end
 
       def visit_block_node(node)
-        [node.parameters.nil? ? s(:args) : s(:args, visit(node.parameters)), visit(node.statements)]
+        [node.parameters.nil? ? s(:args) : s(:args, visit(node.parameters)), visit(node.body)]
       end
 
       def visit_block_parameter_node(node)
@@ -131,6 +135,8 @@ module Parser
         elsif node.message == "-" && [::YARP::IntegerNode, ::YARP::FloatNode, ::YARP::RationalNode, ::YARP::ImaginaryNode].include?(node.receiver.class) && node.arguments.nil?
           result = visit(node.receiver)
           return s(result.type, [-result.children.first])
+        elsif node.message == "not" && !node.receiver && node.opening_loc && node.closing_loc && !node.arguments
+          return s(:send, [s(:begin), :!])
         end
 
         type = node.safe_navigation? ? :csend : :send
@@ -156,6 +162,10 @@ module Parser
         s(:op_asgn, [visit_operator_target(node.target), node.operator.chomp("=").to_sym, visit(node.value)])
       end
 
+      def visit_capture_pattern_node(node)
+        raise NotImplementedError
+      end
+
       def visit_case_node(node)
         if node.conditions.first.is_a?(::YARP::WhenNode)
           s(:case, [visit(node.predicate), *visit_all(node.conditions), visit(node.consequent)])
@@ -166,19 +176,7 @@ module Parser
       end
 
       def visit_class_node(node)
-        s(:class, [visit(node.constant_path), visit(node.superclass), with_context(:locals, node.locals) { visit(node.statements) }])
-      end
-
-      def visit_class_variable_operator_and_write_node(node)
-        s(:and_asgn, [s(:cvasgn, [node.name.to_sym]), visit(node.value)])
-      end
-
-      def visit_class_variable_operator_or_write_node(node)
-        s(:or_asgn, [s(:cvasgn, [node.name.to_sym]), visit(node.value)])
-      end
-
-      def visit_class_variable_operator_write_node(node)
-        s(:op_asgn, [s(:cvasgn, [node.name.to_sym]), node.operator, visit(node.value)])
+        s(:class, [visit(node.constant_path), visit(node.superclass), with_context(:locals, node.locals) { visit(node.body) }])
       end
 
       def visit_class_variable_read_node(node)
@@ -186,36 +184,16 @@ module Parser
       end
 
       def visit_class_variable_write_node(node)
-        s(:cvasgn, [node.name.to_sym, visit(node.value)])
-      end
-
-      def visit_constant_operator_and_write_node(node)
-        s(:and_asgn, [s(:casgn, [nil, node.name.to_sym]), visit(node.value)])
-      end
-
-      def visit_constant_operator_or_write_node(node)
-        s(:or_asgn, [s(:casgn, [nil, node.name.to_sym]), visit(node.value)])
-      end
-
-      def visit_constant_operator_write_node(node)
-        s(:op_asgn, [s(:casgn, [nil, node.name.to_sym]), node.operator, visit(node.value)])
+        if node.value
+          s(:cvasgn, [node.name.to_sym, visit(node.value)])
+        else
+          s(:cvasgn, [node.name.to_sym])
+        end
       end
 
       def visit_constant_path_node(node)
         value = node.child.is_a?(::YARP::ConstantReadNode) ? node.child.slice.to_sym : visit(node.child)
         s(:const, [node.parent ? visit(node.parent) : s(:cbase), value])
-      end
-
-      def visit_constant_path_operator_and_write_node(node)
-        s(:and_asgn, [s(:casgn, visit(node.target).children), visit(node.value)])
-      end
-
-      def visit_constant_path_operator_or_write_node(node)
-        s(:or_asgn, [s(:casgn, visit(node.target).children), visit(node.value)])
-      end
-
-      def visit_constant_path_operator_write_node(node)
-        s(:op_asgn, [s(:casgn, visit(node.target).children), node.operator, visit(node.value)])
       end
 
       def visit_constant_path_write_node(node)
@@ -231,7 +209,11 @@ module Parser
       end
 
       def visit_constant_write_node(node)
-        s(:casgn, [nil, node.name.to_sym, visit(node.value)])
+        if node.value
+          s(:casgn, [nil, node.name.to_sym, visit(node.value)])
+        else
+          s(:casgn, [nil, node.name.to_sym])
+        end
       end
 
       def visit_def_node(node)
@@ -250,11 +232,11 @@ module Parser
           else
             s(:args, visit(node.parameters))
           end,
-          with_context(:locals, node.locals) { visit(node.statements) }
+          with_context(:locals, node.locals) { visit(node.body) }
         ]
 
         if node.receiver.is_a?(::YARP::ParenthesesNode)
-          s(:defs, [visit(node.receiver.statements), *parts])
+          s(:defs, [visit(node.receiver.body), *parts])
         elsif !node.receiver.nil?
           s(:defs, [visit(node.receiver), *parts])
         else
@@ -286,12 +268,16 @@ module Parser
         s(:false)
       end
 
+      def visit_find_pattern_node(node)
+        raise NotImplementedError
+      end
+
       def visit_flip_flop_node(node)
         s(node.exclude_end? ? :eflipflop : :iflipflop, [visit(node.left), visit(node.right)])
       end
 
       def visit_float_node(node)
-        s(:float, [node.slice.to_f])
+        s(:float, [Float(node.slice)])
       end
 
       def visit_for_node(node)
@@ -312,18 +298,6 @@ module Parser
         else
           s(:zsuper)
         end
-      end
-
-      def visit_global_variable_operator_and_write_node(node)
-        s(:and_asgn, [s(:gvasgn, [node.name.to_sym]), visit(node.value)])
-      end
-
-      def visit_global_variable_operator_or_write_node(node)
-        s(:or_asgn, [s(:gvasgn, [node.name.to_sym]), visit(node.value)])
-      end
-
-      def visit_global_variable_operator_write_node(node)
-        s(:op_asgn, [s(:gvasgn, [node.name.to_sym]), node.operator, visit(node.value)])
       end
 
       def visit_global_variable_read_node(node)
@@ -347,23 +321,11 @@ module Parser
       end
 
       def visit_imaginary_node(node)
-        s(:complex, [eval(node.slice)])
+        s(:complex, [Complex(0, visit(node.numeric).children.first)])
       end
 
       def visit_in_node(node)
         s(:in_pattern, [with_context(:pattern, true) { visit(node.pattern) }, nil, visit(node.statements)])
-      end
-
-      def visit_instance_variable_operator_and_write_node(node)
-        s(:and_asgn, [s(:ivasgn, [node.name.to_sym]), visit(node.value)])
-      end
-
-      def visit_instance_variable_operator_or_write_node(node)
-        s(:or_asgn, [s(:ivasgn, [node.name.to_sym]), visit(node.value)])
-      end
-
-      def visit_instance_variable_operator_write_node(node)
-        s(:op_asgn, [s(:ivasgn, [node.name.to_sym]), node.operator, visit(node.value)])
       end
 
       def visit_instance_variable_read_node(node)
@@ -379,7 +341,7 @@ module Parser
       end
 
       def visit_integer_node(node)
-        s(:int, [node.slice.to_i])
+        s(:int, [Integer(node.slice)])
       end
 
       def visit_interpolated_regular_expression_node(node)
@@ -427,19 +389,7 @@ module Parser
       end
 
       def visit_lambda_node(node)
-        s(:block, [s(:send, [nil, :lambda]), node.parameters ? s(:args, visit(node.parameters)) : s(:args), with_context(:locals, node.locals) { visit(node.statements) }])
-      end
-
-      def visit_local_variable_operator_and_write_node(node)
-        s(:and_asgn, [s(:lvasgn, [node.constant_id]), visit(node.value)])
-      end
-
-      def visit_local_variable_operator_or_write_node(node)
-        s(:or_asgn, [s(:lvasgn, [node.constant_id]), visit(node.value)])
-      end
-
-      def visit_local_variable_operator_write_node(node)
-        s(:op_asgn, [s(:lvasgn, [node.constant_id]), node.operator_id, visit(node.value)])
+        s(:block, [s(:send, [nil, :lambda]), node.parameters ? s(:args, visit(node.parameters)) : s(:args), with_context(:locals, node.locals) { visit(node.body) }])
       end
 
       def visit_local_variable_read_node(node)
@@ -460,8 +410,12 @@ module Parser
         s(:match_pattern, [visit(node.value), with_context(:pattern, true) { visit(node.pattern) }])
       end
 
+      def visit_missing_node(node)
+        raise NotImplementedError
+      end
+
       def visit_module_node(node)
-        s(:module, [visit(node.constant_path), with_context(:locals, node.locals) { visit(node.statements) }])
+        s(:module, [visit(node.constant_path), with_context(:locals, node.locals) { visit(node.body) }])
       end
 
       def visit_multi_write_node(node)
@@ -490,12 +444,20 @@ module Parser
         s(:nth_ref, [node.slice.delete_prefix("$").to_i])
       end
 
+      def visit_operator_write_node(node)
+        s(:op_asgn, [visit(node.target), node.operator, visit(node.value)])
+      end
+
       def visit_optional_parameter_node(node)
         s(:optarg, [node.constant_id, visit(node.value)])
       end
 
       def visit_or_node(node)
         s(:or, [visit(node.left), visit(node.right)])
+      end
+
+      def visit_or_write_node(node)
+        s(:or_asgn, [visit(node.target), visit(node.value)])
       end
 
       def visit_parameters_node(node)
@@ -511,12 +473,20 @@ module Parser
       end
 
       def visit_parentheses_node(node)
-        if node.statements.nil?
+        if node.body.nil?
           s(:begin)
         else
-          child = visit(node.statements)
+          child = visit(node.body)
           child.type == :begin ? child : s(:begin, [child])
         end
+      end
+
+      def visit_pinned_expression_node(node)
+        raise NotImplementedError
+      end
+
+      def visit_pinned_variable_node(node)
+        raise NotImplementedError
       end
 
       def visit_post_execution_node(node)
@@ -536,7 +506,7 @@ module Parser
       end
 
       def visit_rational_node(node)
-        s(:rational, [node.slice.to_r])
+        s(:rational, [Rational(node.slice.chomp("r"))])
       end
 
       def visit_redo_node(node)
@@ -597,7 +567,7 @@ module Parser
       end
 
       def visit_singleton_class_node(node)
-        s(:sclass, [visit(node.expression), with_context(:locals, node.locals) { visit(node.statements) }])
+        s(:sclass, [visit(node.expression), with_context(:locals, node.locals) { visit(node.body) }])
       end
 
       def visit_source_encoding_node(node)
@@ -742,6 +712,19 @@ module Parser
     # Parse the contents of the given buffer and return the AST.
     def self.parse(buffer)
       ::YARP.parse(buffer.source, buffer.name).value.accept(Visitor.new(buffer))
+    end
+
+    # Validate that the visitor has a visit method for each node type and only
+    # those node types.
+    expected = ::YARP.constants.grep(/.Node$/).map(&:name)
+    actual = Visitor.instance_methods(false).grep(/^visit_/).map { _1[6..].split("_").map(&:capitalize).join }
+
+    if (extra = actual - expected).any?
+      raise "Unexpected visit methods for: #{extra.join(", ")}"
+    end
+
+    if (missing = expected - actual).any?
+      raise "Missing visit methods for: #{missing.join(", ")}"
     end
   end
 end
