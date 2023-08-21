@@ -5,7 +5,11 @@ GEM
     parser (3.2.2.3)
       ast (~> 2.4.1)
       racc
+    power_assert (2.0.3)
     racc (1.7.1)
+    rake (13.0.6)
+    test-unit (3.6.1)
+      power_assert
     yarp (0.8.0)
 
 PLATFORMS
@@ -13,6 +17,8 @@ PLATFORMS
 
 DEPENDENCIES
   parser
+  rake
+  test-unit
   yarp (~> 0.8)
 
 BUNDLED WITH
