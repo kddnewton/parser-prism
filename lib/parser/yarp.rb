@@ -1,15 +1,33 @@
 # frozen_string_literal: true
 
-require "parser"
+require "parser/current"
 require "yarp"
 
-module YARP
-  class Location
-    def to(other)
-      Location.new(source, start_offset, other.end_offset - start_offset)
+# First, opt in to every AST feature.
+Parser::Builders::Default.modernize
+
+# Modify the source map == check so that it doesn't check against the node
+# itself so we don't get into a recursive loop.
+Parser::Source::Map.prepend(
+  Module.new {
+    def ==(other)
+      self.class == other.class &&
+        (instance_variables - %i[@node]).map do |ivar|
+          instance_variable_get(ivar) == other.instance_variable_get(ivar)
+        end.reduce(:&)
     end
-  end
-end
+  }
+)
+
+# Next, ensure that we're comparing the nodes and also comparing the source
+# ranges so that we're getting all of the necessary information.
+Parser::AST::Node.prepend(
+  Module.new {
+    def ==(other)
+      super && (location == other.location)
+    end
+  }
+)
 
 module Parser
   module YARP
@@ -48,7 +66,18 @@ module Parser
       # []
       # ^^
       def visit_array_node(node)
-        s(:array, visit_all(node.elements), smap_collection(srange(node.opening_loc), srange(node.closing_loc), srange(node.location)))
+        children =
+          node.elements.map do |element|
+            case element
+            when ::YARP::KeywordHashNode
+              visited = visit(element)
+              s(:hash, visited.children, visited.location)
+            else
+              visit(element)
+            end
+          end
+
+        s(:array, children, smap_collection(srange(node.opening_loc), srange(node.closing_loc), srange(node.location)))
       end
 
       # foo => [bar]
@@ -74,12 +103,22 @@ module Parser
       #   ^^^^
       def visit_assoc_node(node)
         if context[:pattern] && node.value.nil?
-          s(:match_var, [node.key.unescaped.to_sym])
+          s(:match_var, [node.key.unescaped.to_sym], smap_variable(srange(node.key.value_loc), srange(node.key.location)))
         elsif node.value.nil?
-          name = node.key.unescaped.to_sym
-          type = name[0].match?(/[[:upper:]]/) ? :const : :send
+          key_name = node.key.unescaped.to_sym
+          key_location = srange_offsets(node.key.location.start_offset, node.key.location.end_offset - 1)
 
-          s(:pair, [visit(node.key), s(type, [nil, name])], smap_operator(srange(node.key.closing_loc), srange(node.location)))
+          key_value =
+            if key_name[0].match?(/[[:upper:]]/)
+              s(:const, [nil, key_name], smap_constant(nil, key_location, key_location))
+            else
+              s(:send, [nil, key_name], smap_send_bare(key_location, key_location))
+            end
+
+          s(:pair, [s(:sym, [key_name], smap_collection_bare(key_location)), key_value], smap_operator(srange(node.key.closing_loc), srange(node.location)))
+        elsif node.key.is_a?(::YARP::SymbolNode) && node.key.closing&.end_with?(":")
+          visited = visit(node.key)
+          s(:pair, [s(visited.type, visited.children, smap_collection(srange(node.key.opening_loc), node.key.closing_loc.start_offset == node.key.closing_loc.end_offset - 1 ? nil : srange_offsets(node.key.closing_loc.start_offset, node.key.closing_loc.end_offset - 1), srange_offsets(node.key.location.start_offset, node.key.location.end_offset - 1))), visit(node.value)], smap_operator(srange_offsets(node.key.closing_loc.end_offset - 1, node.key.closing_loc.end_offset), srange(node.location)))
         else
           s(:pair, [visit(node.key), visit(node.value)], smap_operator(srange(node.operator_loc), srange(node.location)))
         end
@@ -122,19 +161,30 @@ module Parser
 
           if node.rescue_clause
             rescue_node = visit(node.rescue_clause)
-            children = [result] + rescue_node.children
 
+            children = [result] + rescue_node.children
             if node.else_clause
               children.pop
               children << visit(node.else_clause)
             end
 
-            result = s(rescue_node.type, children, rescue_node.location)
+            rescue_location = rescue_node.location
+            if node.statements
+              rescue_location = rescue_location.with_expression(srange_offsets(node.statements.location.start_offset, node.rescue_clause.location.end_offset))
+            end
+
+            result = s(rescue_node.type, children, rescue_location)
           end
 
           if node.ensure_clause
             ensure_node = visit(node.ensure_clause)
-            result = s(ensure_node.type, [result] + ensure_node.children)
+
+            ensure_location = ensure_node.location
+            if node.statements
+              ensure_location = ensure_location.with_expression(srange_offsets(node.statements.location.start_offset, (node.ensure_clause.statements&.location || node.ensure_clause.keyword_loc).end_offset))
+            end
+
+            result = s(ensure_node.type, [result] + ensure_node.children, ensure_location)
           end
 
           if node.begin_keyword_loc
@@ -153,7 +203,13 @@ module Parser
 
       # A block on a keyword or method call.
       def visit_block_node(node)
-        [node.parameters.nil? ? s(:args, [], smap_collection_bare(nil)) : s(:args, visit(node.parameters), smap_collection(srange(node.parameters.opening_loc), srange(node.parameters.closing_loc), srange(node.parameters.location))), visit(node.body)]
+        if node.parameters.nil?
+          [s(:args, [], smap_collection_bare(nil)), visit(node.body)]
+        elsif (parameter = procarg0(node.parameters))
+          [parameter, visit(node.body)]
+        else
+          [s(:args, visit(node.parameters), smap_collection(srange(node.parameters.opening_loc), srange(node.parameters.closing_loc), srange(node.parameters.location))), visit(node.body)]
+        end
       end
 
       # def foo(&bar); end
@@ -164,7 +220,7 @@ module Parser
 
       # A block's parameters.
       def visit_block_parameters_node(node)
-        [*visit(node.parameters), *node.locals.map { |local| s(:shadowarg, [local.slice.to_sym], smap_variable(srange(local), srange(local))) }]
+        [*visit(node.parameters)].concat(node.locals.map { |local| s(:shadowarg, [local.slice.to_sym], smap_variable(srange(local), srange(local))) })
       end
 
       # break
@@ -186,41 +242,84 @@ module Parser
       # ^^^^^^^^^^^^
       def visit_call_node(node)
         if node.message == "=~" && node.receiver.is_a?(::YARP::RegularExpressionNode) && node.arguments && node.arguments.arguments.length == 1
-          return s(:match_with_lvasgn, [visit(node.receiver), visit(node.arguments.arguments.first)])
-        elsif node.message == "-" && [::YARP::IntegerNode, ::YARP::FloatNode, ::YARP::RationalNode, ::YARP::ImaginaryNode].include?(node.receiver.class) && node.arguments.nil?
-          result = visit(node.receiver)
-          return s(result.type, [-result.children.first])
+          return s(:match_with_lvasgn, [visit(node.receiver), visit(node.arguments.arguments.first)], smap_send_bare(srange(node.message_loc), srange(node.location)))
         elsif node.message == "not" && !node.receiver && node.opening_loc && node.closing_loc && !node.arguments
-          return s(:send, [s(:begin), :!])
+          return s(:send, [s(:begin, [], smap_collection(srange(node.opening_loc), srange(node.closing_loc), srange(node.opening_loc.to(node.closing_loc)))), :!], smap_send_bare(srange(node.message_loc), srange(node.location)))
         end
 
         type = node.safe_navigation? ? :csend : :send
         parts = [visit(node.receiver), node.name.to_sym]
         parts.concat(visit(node.arguments)) unless node.arguments.nil?
 
-        if node.block
-          s(:block, [s(type, parts, smap_send(srange(node.operator_loc), srange(node.message_loc), srange(node.opening_loc), srange(node.closing_loc), srange_offsets(node.location.start_offset, (node.closing_loc || node.arguments&.location || node.message_loc).end_offset)))].concat(visit(node.block)), smap_collection(srange(node.block.opening_loc), srange(node.block.closing_loc), srange(node.location)))
-        else
-          s(type, parts, smap_send(srange(node.operator_loc), srange(node.message_loc), srange(node.opening_loc), srange(node.closing_loc), srange(node.location)))
-        end
+        call_expression =
+          if node.block
+            srange_offsets(node.location.start_offset, (node.closing_loc || node.arguments&.location || node.message_loc).end_offset)
+          else
+            srange(node.location)
+          end
+
+        call =
+          if node.name == "[]"
+            parts.delete_at(1)
+            s(:index, parts, smap_index(srange_offsets(node.message_loc.start_offset, node.message_loc.start_offset + 1), srange_offsets(node.message_loc.end_offset - 1, node.message_loc.end_offset), call_expression))
+          elsif node.name == "[]=" && node.message != "[]="
+            parts.delete_at(1)
+            s(:indexasgn, parts, smap_index(srange_offsets(node.message_loc.start_offset, node.message_loc.start_offset + 1), srange_offsets(node.message_loc.end_offset - 1, node.message_loc.end_offset), call_expression).with_operator(srange_find(node.message_loc.end_offset, node.arguments.arguments.last.location.start_offset, ["="])))
+          elsif node.name.end_with?("=") && !node.message.end_with?("=") && node.arguments
+            s(type, parts, smap_send(srange(node.operator_loc), srange(node.message_loc), srange(node.opening_loc), srange(node.closing_loc), call_expression).with_operator(srange_find(node.message_loc.end_offset, node.arguments.arguments.last.location.start_offset, ["="])))
+          else
+            s(type, parts, smap_send(srange(node.operator_loc), srange(node.message_loc), srange(node.opening_loc), srange(node.closing_loc), call_expression))
+          end
+
+        node.block ? s(:block, [call].concat(visit(node.block)), smap_collection(srange(node.block.opening_loc), srange(node.block.closing_loc), srange(node.location))) : call
       end
 
       # foo.bar &&= baz
       # ^^^^^^^^^^^^^^^
+      #
+      # foo[bar] &&= baz
+      # ^^^^^^^^^^^^^^^^
       def visit_call_operator_and_write_node(node)
-        s(:and_asgn, [visit_call_operator_write(node.target), visit(node.value)], smap_send(srange(node.target.operator_loc), srange(node.target.message_loc), nil, nil, srange(node.location)).with_operator(srange(node.operator_loc)))
+        location =
+          if node.target.name == "[]=" && node.target.message != "[]="
+            smap_index(srange_offsets(node.target.message_loc.start_offset, node.target.message_loc.start_offset + 1), srange_offsets(node.target.message_loc.end_offset - 1, node.target.message_loc.end_offset), srange(node.location)).with_operator(srange(node.operator_loc))
+          else
+            smap_send(srange(node.target.operator_loc), srange(node.target.message_loc), nil, nil, srange(node.location)).with_operator(srange(node.operator_loc))
+          end
+
+        s(:and_asgn, [visit_call_operator_write(node.target), visit(node.value)], location)
       end
 
       # foo.bar ||= baz
       # ^^^^^^^^^^^^^^^
+      #
+      # foo[bar] ||= baz
+      # ^^^^^^^^^^^^^^^^
       def visit_call_operator_or_write_node(node)
-        s(:or_asgn, [visit_call_operator_write(node.target), visit(node.value)], smap_send(srange(node.target.operator_loc), srange(node.target.message_loc), nil, nil, srange(node.location)).with_operator(srange(node.operator_loc)))
+        location =
+          if node.target.name == "[]=" && node.target.message != "[]="
+            smap_index(srange_offsets(node.target.message_loc.start_offset, node.target.message_loc.start_offset + 1), srange_offsets(node.target.message_loc.end_offset - 1, node.target.message_loc.end_offset), srange(node.location)).with_operator(srange(node.operator_loc))
+          else
+            smap_send(srange(node.target.operator_loc), srange(node.target.message_loc), nil, nil, srange(node.location)).with_operator(srange(node.operator_loc))
+          end
+
+        s(:or_asgn, [visit_call_operator_write(node.target), visit(node.value)], location)
       end
 
       # foo.bar += baz
       # ^^^^^^^^^^^^^^^
+      #
+      # foo[bar] += baz
+      # ^^^^^^^^^^^^^^^
       def visit_call_operator_write_node(node)
-        s(:op_asgn, [visit_call_operator_write(node.target), node.operator.chomp("=").to_sym, visit(node.value)], smap_send(srange(node.target.operator_loc), srange(node.target.message_loc), nil, nil, srange(node.location)).with_operator(srange(node.operator_loc)))
+        location =
+          if node.target.name == "[]=" && node.target.message != "[]="
+            smap_index(srange_offsets(node.target.message_loc.start_offset, node.target.message_loc.start_offset + 1), srange_offsets(node.target.message_loc.end_offset - 1, node.target.message_loc.end_offset), srange(node.location)).with_operator(srange(node.operator_loc))
+          else
+            smap_send(srange(node.target.operator_loc), srange(node.target.message_loc), nil, nil, srange(node.location)).with_operator(srange(node.operator_loc))
+          end
+
+        s(:op_asgn, [visit_call_operator_write(node.target), node.operator.chomp("=").to_sym, visit(node.value)], location)
       end
 
       # foo => bar => baz
@@ -236,9 +335,9 @@ module Parser
       # ^^^^^^^^^^^^^^^^^^^^^
       def visit_case_node(node)
         if node.conditions.first.is_a?(::YARP::WhenNode)
-          s(:case, [visit(node.predicate), *visit_all(node.conditions), visit(node.consequent)], smap_condition(srange(node.case_keyword_loc), nil, srange(node.consequent&.keyword_loc), srange(node.end_keyword_loc), srange(node.location)))
+          s(:case, [visit(node.predicate), *visit_all(node.conditions), visit(node.consequent)], smap_condition(srange(node.case_keyword_loc), nil, srange(node.consequent&.else_keyword_loc), srange(node.end_keyword_loc), srange(node.location)))
         else
-          s(:case_match, [visit(node.predicate), *visit_all(node.conditions), node.consequent && node.consequent.statements.nil? ? s(:empty_else) : visit(node.consequent)], smap_condition(srange(node.case_keyword_loc), nil, srange(node.consequent&.keyword_loc), srange(node.end_keyword_loc), srange(node.location)))
+          s(:case_match, [visit(node.predicate), *visit_all(node.conditions), node.consequent && node.consequent.statements.nil? ? s(:empty_else, [], smap(srange(node.consequent.else_keyword_loc))) : visit(node.consequent)], smap_condition(srange(node.case_keyword_loc), nil, srange(node.consequent&.else_keyword_loc), srange(node.end_keyword_loc), srange(node.location)))
         end
       end
 
@@ -327,14 +426,6 @@ module Parser
             else
               s(:args, [], smap_collection_bare(nil))
             end
-          elsif node.parameters.requireds.empty? &&
-                node.parameters.optionals.empty? &&
-                node.parameters.rest.nil? &&
-                node.parameters.posts.empty? &&
-                node.parameters.keywords.empty? &&
-                node.parameters.keyword_rest.is_a?(::YARP::ForwardingParameterNode) &&
-                node.parameters.block.nil?
-            s(:forward_args)
           else
             if node.lparen_loc && node.rparen_loc
               s(:args, visit(node.parameters), smap_collection(srange(node.lparen_loc), srange(node.rparen_loc), srange_offsets(node.lparen_loc.start_offset, node.rparen_loc.end_offset)))
@@ -389,8 +480,10 @@ module Parser
         visit(node.variable)
       end
 
+      # begin; foo; ensure; bar; end
+      #             ^^^^^^^^^^^^
       def visit_ensure_node(node)
-        s(:ensure, [visit(node.statements)])
+        s(:ensure, [visit(node.statements)], smap_condition(srange(node.ensure_keyword_loc), nil, nil, nil, srange(node.location)))
       end
 
       # false
@@ -414,11 +507,13 @@ module Parser
       # 1.0
       # ^^^
       def visit_float_node(node)
-        s(:float, [Float(node.slice)], smap_operator(node.slice.match?(/^[+-]/) ? srange_offsets(node.location.start_offset, node.location.start_offset + 1) : nil, srange(node.location)))
+        s(:float, [node.value], smap_operator(node.slice.match?(/^[+-]/) ? srange_offsets(node.location.start_offset, node.location.start_offset + 1) : nil, srange(node.location)))
       end
 
+      # for foo in bar do end
+      # ^^^^^^^^^^^^^^^^^^^^^
       def visit_for_node(node)
-        s(:for, [visit(node.index), visit(node.collection), visit(node.statements)])
+        s(:for, [visit(node.index), visit(node.collection), visit(node.statements)], smap_for(srange(node.for_keyword_loc), srange(node.in_keyword_loc), node.do_keyword_loc ? srange(node.do_keyword_loc) : srange_find(node.collection.location.end_offset, (node.statements&.location || node.end_keyword_loc).start_offset, [";"]), srange(node.end_keyword_loc), srange(node.location)))
       end
 
       # def foo(...); bar(...); end
@@ -486,8 +581,26 @@ module Parser
       # foo ? bar : baz
       # ^^^^^^^^^^^^^^^
       def visit_if_node(node)
-        if node.if_keyword_loc.start_offset == node.location.start_offset
-          s(:if, [visit(node.predicate), visit(node.statements), visit(node.consequent)], smap_condition(srange(node.if_keyword_loc), nil, nil, srange(node.end_keyword_loc), srange(node.location)))
+        if !node.if_keyword_loc
+          s(:if, [visit(node.predicate), visit(node.statements), visit(node.consequent)], smap_ternary(srange_find(node.predicate.location.end_offset, node.statements.location.start_offset, ["?"]), srange(node.consequent.else_keyword_loc), srange(node.location)))
+        elsif node.if_keyword_loc.start_offset == node.location.start_offset
+          begin_token = srange_find(node.predicate.location.end_offset, (node.statements&.location || node.consequent&.location || node.end_keyword_loc).start_offset, [";", "then"])
+          else_token =
+            case node.consequent
+            when ::YARP::IfNode
+              srange(node.consequent.if_keyword_loc)
+            when ::YARP::ElseNode
+              srange(node.consequent.else_keyword_loc)
+            end
+
+          location =
+            if node.if_keyword == "elsif" && node.consequent&.statements
+              smap_condition(srange(node.if_keyword_loc), begin_token, else_token, nil, srange_offsets(node.location.start_offset, node.consequent.statements.location.end_offset))
+            else
+              smap_condition(srange(node.if_keyword_loc), begin_token, else_token, srange(node.end_keyword_loc), srange(node.location))
+            end
+
+          s(:if, [visit(node.predicate), visit(node.statements), visit(node.consequent)], location)
         else
           s(:if, [visit(node.predicate), visit(node.statements), visit(node.consequent)], smap_keyword_bare(srange(node.if_keyword_loc), srange(node.location)))
         end
@@ -495,13 +608,13 @@ module Parser
 
       # 1i
       def visit_imaginary_node(node)
-        s(:complex, [Complex(0, visit(node.numeric).children.first)], smap_operator(nil, srange(node.location)))
+        s(:complex, [node.value], smap_operator(nil, srange(node.location)))
       end
 
       # case foo; in bar; end
       # ^^^^^^^^^^^^^^^^^^^^^
       def visit_in_node(node)
-        s(:in_pattern, [with_context(:pattern, true) { visit(node.pattern) }, nil, visit(node.statements)], smap_keyword(srange(node.in_loc), nil, nil, srange(node.location)))
+        s(:in_pattern, [with_context(:pattern, true) { visit(node.pattern) }, nil, visit(node.statements)], smap_keyword(srange(node.in_loc), srange_find(node.pattern.location.end_offset, (node.statements&.location || node.location).start_offset, [";"]), nil, srange(node.location)))
       end
 
       # @foo
@@ -526,7 +639,7 @@ module Parser
       # 1
       # ^
       def visit_integer_node(node)
-        s(:int, [Integer(node.slice)], smap_operator(node.slice.match?(/^[+-]/) ? srange_offsets(node.location.start_offset, node.location.start_offset + 1) : nil, srange(node.location)))
+        s(:int, [node.value], smap_operator(node.slice.match?(/^[+-]/) ? srange_offsets(node.location.start_offset, node.location.start_offset + 1) : nil, srange(node.location)))
       end
 
       # /foo #{bar}/
@@ -539,7 +652,7 @@ module Parser
       # ^^^^^^^^^^^^
       def visit_interpolated_string_node(node)
         if node.opening&.start_with?("<<")
-          visit_heredoc(:dstr, node.parts)
+          visit_heredoc(:dstr, node)
         elsif node.parts.length == 1 && node.parts.first.is_a?(::YARP::StringNode)
           visit(node.parts.first)
         else
@@ -557,7 +670,7 @@ module Parser
       # ^^^^^^^^^^^^
       def visit_interpolated_x_string_node(node)
         if node.opening.start_with?("<<")
-          visit_heredoc(:xstr, node.parts)
+          visit_heredoc(:xstr, node)
         else
           s(:xstr, visit_all(node.parts), smap_collection(srange(node.opening_loc), srange(node.closing_loc), srange(node.location)))
         end
@@ -566,7 +679,7 @@ module Parser
       # foo(bar: baz)
       #     ^^^^^^^^
       def visit_keyword_hash_node(node)
-        s(:hash, visit_all(node.elements), smap_collection_bare(srange(node.location)))
+        s(:kwargs, visit_all(node.elements), smap_collection_bare(srange(node.location)))
       end
 
       # def foo(bar:); end
@@ -595,8 +708,9 @@ module Parser
         end
       end
 
+      # -> {}
       def visit_lambda_node(node)
-        s(:block, [s(:send, [nil, :lambda]), node.parameters ? s(:args, visit(node.parameters)) : s(:args), with_context(:locals, node.locals) { visit(node.body) }])
+        s(:block, [s(:lambda, [], smap(srange(node.operator_loc))), node.parameters ? s(:args, visit(node.parameters), smap_collection(srange(node.parameters.opening_loc), srange(node.parameters.closing_loc), srange(node.parameters.location))) : s(:args, [], smap_collection_bare(nil)), with_context(:locals, node.locals) { visit(node.body) }], smap_collection(srange(node.opening_loc), srange(node.closing_loc), srange(node.location)))
       end
 
       # foo
@@ -643,13 +757,20 @@ module Parser
         s(:module, [visit(node.constant_path), with_context(:locals, node.locals) { visit(node.body) }], smap_definition(srange(node.module_keyword_loc), nil, srange(node.constant_path.location), srange(node.end_keyword_loc)))
       end
 
+      # foo, bar = baz
       def visit_multi_write_node(node)
-        if node.targets.length == 1 && node.value.nil?
+        if (node.targets.length == 1 || (node.targets.length == 2 && node.targets.last.is_a?(::YARP::SplatNode) && node.targets.last.operator == ",")) && node.value.nil?
           visit(node.targets.first)
-        elsif node.value.nil?
-          s(:mlhs, visit_all(node.targets))
         else
-          s(:masgn, [s(:mlhs, visit_all(node.targets), smap_collection_bare(srange(node.targets.first.location.to(node.targets.last.location)))), visit(node.value)], smap_operator(srange(node.operator_loc), srange(node.location)))
+          mlhs_location =
+            if node.lparen_loc && node.rparen_loc
+              srange(node.lparen_loc.to(node.rparen_loc))
+            else
+              srange(node.targets.first.location.to(node.targets.last.location))
+            end
+
+          mlhs = s(:mlhs, visit_all(node.targets), smap_collection(srange(node.lparen_loc), srange(node.rparen_loc), mlhs_location))
+          node.value ? s(:masgn, [mlhs, visit(node.value)], smap_operator(srange(node.operator_loc), srange(node.location))) : mlhs
         end
       end
 
@@ -736,11 +857,18 @@ module Parser
       # (1)
       # ^^^
       def visit_parentheses_node(node)
+        location = smap_collection(srange(node.opening_loc), srange(node.closing_loc), srange(node.location))
+        
         if node.body.nil?
-          s(:begin, [], smap_collection(srange(node.opening_loc), srange(node.closing_loc), srange(node.location)))
+          s(:begin, [], location)
         else
           child = visit(node.body)
-          child.type == :begin ? child : s(:begin, [child], smap_collection(srange(node.opening_loc), srange(node.closing_loc), srange(node.location)))
+
+          if child.type == :begin
+            s(:begin, child.children, location)
+          else
+            s(:begin, [child], location)
+          end
         end
       end
 
@@ -768,7 +896,14 @@ module Parser
 
       # The top-level program node.
       def visit_program_node(node)
-        visit(node.statements)
+        case node.statements.body.length
+        when 0
+          # nothing
+        when 1
+          visit_top_level(node.statements.body.first)
+        else
+          s(:begin, node.statements.body.map { visit_top_level(_1) }, smap_collection_bare(srange(node.location)))
+        end
       end
 
       # 0..5
@@ -780,7 +915,7 @@ module Parser
       # 1r
       # ^^
       def visit_rational_node(node)
-        s(:rational, [Rational(node.slice.chomp("r"))], smap_operator(nil, srange(node.location)))
+        s(:rational, [node.value], smap_operator(nil, srange(node.location)))
       end
 
       # redo
@@ -817,12 +952,15 @@ module Parser
       #        ^^^^^^^
       def visit_rescue_node(node)
         resbody_children = [
-          node.exceptions.any? ? s(:array, visit_all(node.exceptions)) : nil,
+          node.exceptions.any? ? s(:array, visit_all(node.exceptions), smap_collection_bare(srange_offsets(node.exceptions.first.location.start_offset, node.exceptions.last.location.end_offset))) : nil,
           node.reference ? visit(node.reference) : nil,
           visit(node.statements)
         ]
 
-        children = [s(:resbody, resbody_children, smap_rescue_body(srange(node.keyword_loc), srange(node.operator_loc), nil, srange(node.location)))]
+        find_start_offset = (node.reference&.location || node.exceptions.last&.location || node.keyword_loc).end_offset
+        find_end_offset = (node.statements&.location&.start_offset || node.consequent&.location&.start_offset || (find_start_offset + 1))
+
+        children = [s(:resbody, resbody_children, smap_rescue_body(srange(node.keyword_loc), srange(node.operator_loc), srange_find(find_start_offset, find_end_offset, [";"]), srange(node.location)))]
         if node.consequent
           children.concat(visit(node.consequent).children)
         else
@@ -871,7 +1009,7 @@ module Parser
       # __ENCODING__
       # ^^^^^^^^^^^^
       def visit_source_encoding_node(node)
-        s(:const, [s(:const, [nil, :Encoding], nil), :UTF_8], smap(srange(node.location)))
+        s(:__ENCODING__, [], smap(srange(node.location)))
       end
 
       # __FILE__
@@ -898,9 +1036,17 @@ module Parser
         if node.expression.nil? && context[:locals].include?(:*)
           s(:forwarded_restarg, [], smap(srange(node.location)))
         elsif context[:destructured]
-          s(:restarg, node.expression.nil? ? [] : [node.expression.constant_id], smap_variable(srange(node.expression.location), srange(node.location)))
+          if node.expression
+            s(:restarg, [node.expression.constant_id], smap_variable(srange(node.expression.location), srange(node.location)))
+          else
+            s(:restarg, [], smap_variable(nil, srange(node.location)))
+          end
         else
-          s(:splat, [visit(node.expression)], smap_operator(srange(node.operator_loc), srange(node.location)))
+          if node.expression
+            s(:splat, [visit(node.expression)], smap_operator(srange(node.operator_loc), srange(node.location)))
+          else
+            s(:splat, [], smap_operator(srange(node.operator_loc), srange(node.location)))
+          end
         end
       end
 
@@ -941,7 +1087,7 @@ module Parser
       # :foo
       # ^^^^
       def visit_symbol_node(node)
-        s(:sym, [node.unescaped.to_sym], node.closing == ":" ? smap_collection(srange(node.opening_loc), srange_offsets(node.closing_loc.start_offset, node.closing_loc.start_offset + 1), srange_offsets(node.location.start_offset, node.location.end_offset - 1)) : smap_collection(srange(node.opening_loc), srange(node.closing_loc), srange(node.location)))
+        s(:sym, [node.unescaped.to_sym], smap_collection(srange(node.opening_loc), srange(node.closing_loc), srange(node.location)))
       end
 
       # true
@@ -962,7 +1108,11 @@ module Parser
       # bar unless foo
       # ^^^^^^^^^^^^^^
       def visit_unless_node(node)
-        s(:if, [visit(node.predicate), visit(node.consequent), visit(node.statements)], smap_keyword_bare(srange(node.keyword_loc), srange(node.location)))
+        if node.keyword_loc.start_offset == node.location.start_offset
+          s(:if, [visit(node.predicate), visit(node.consequent), visit(node.statements)], smap_condition(srange(node.keyword_loc), srange_find(node.predicate.location.end_offset, (node.statements&.location || node.consequent&.location || node.end_keyword_loc).start_offset, [";", "then"]), node.consequent ? srange(node.consequent.else_keyword_loc) : nil, srange(node.end_keyword_loc), srange(node.location)))
+        else
+          s(:if, [visit(node.predicate), visit(node.consequent), visit(node.statements)], smap_keyword_bare(srange(node.keyword_loc), srange(node.location)))
+        end
       end
 
       # until foo; bar end
@@ -971,13 +1121,17 @@ module Parser
       # bar until foo
       # ^^^^^^^^^^^^^
       def visit_until_node(node)
-        s(node.begin_modifier? ? :until_post : :until, [visit(node.predicate), visit(node.statements)], smap_keyword(srange(node.keyword_loc), nil, nil, srange(node.location)))
+        if node.location.start_offset == node.keyword_loc.start_offset
+          s(:until, [visit(node.predicate), visit(node.statements)], smap_keyword(srange(node.keyword_loc), srange_find(node.predicate.location.end_offset, (node.statements&.location || node.closing_loc).start_offset, [";", "do"]), srange(node.closing_loc), srange(node.location)))
+        else
+          s(node.begin_modifier? ? :until_post : :until, [visit(node.predicate), visit(node.statements)], smap_keyword(srange(node.keyword_loc), nil, srange(node.closing_loc), srange(node.location)))
+        end
       end
 
       # case foo; when bar; end
       #           ^^^^^^^^^^^^^
       def visit_when_node(node)
-        s(:when, visit_all(node.conditions).push(visit(node.statements)), smap_keyword(srange(node.keyword_loc), nil, nil, srange(node.location)))
+        s(:when, visit_all(node.conditions).push(visit(node.statements)), smap_keyword(srange(node.keyword_loc), srange_find(node.conditions.last.location.end_offset, node.statements&.location&.start_offset || (node.conditions.last.location.end_offset + 1), [";", "then"]), nil, srange(node.location)))
       end
 
       # while foo; bar end
@@ -986,7 +1140,11 @@ module Parser
       # bar while foo
       # ^^^^^^^^^^^^^
       def visit_while_node(node)
-        s(node.begin_modifier? ? :while_post : :while, [visit(node.predicate), visit(node.statements)], smap_keyword(srange(node.keyword_loc), nil, nil, srange(node.location)))
+        if node.location.start_offset == node.keyword_loc.start_offset
+          s(:while, [visit(node.predicate), visit(node.statements)], smap_keyword(srange(node.keyword_loc), srange_find(node.predicate.location.end_offset, (node.statements&.location || node.closing_loc).start_offset, [";", "do"]), srange(node.closing_loc), srange(node.location)))
+        else
+          s(node.begin_modifier? ? :while_post : :while, [visit(node.predicate), visit(node.statements)], smap_keyword(srange(node.keyword_loc), nil, srange(node.closing_loc), srange(node.location)))
+        end
       end
 
       # `foo`
@@ -1010,6 +1168,33 @@ module Parser
 
       private
 
+      # Blocks can have a special set of parameters that automatically expand
+      # when given arrays if they have a single required parameter and no other
+      # parameters.
+      def procarg0(block_parameters)
+        if (parameters = block_parameters.parameters) &&
+           parameters.requireds.length == 1 &&
+           (parameter = parameters.requireds.first) &&
+           parameters.optionals.empty? &&
+           parameters.rest.nil? &&
+           parameters.posts.empty? &&
+           parameters.keywords.empty? &&
+           parameters.keyword_rest.nil? &&
+           parameters.block.nil? &&
+           block_parameters.locals.empty?
+
+          location = smap_collection(srange(block_parameters.opening_loc), srange(block_parameters.closing_loc), srange(block_parameters.location))
+
+          if parameter.is_a?(::YARP::RequiredParameterNode)
+            s(:args, [s(:procarg0, [visit(parameter)], smap_collection_bare(srange(parameter.location)))], location)
+          else
+            visited = visit(parameter)
+            s(:args, [s(:procarg0, visited.children, visited.location)], location)
+          end
+        end
+      end
+
+      # Create a new parser node.
       def s(type, children = [], location = nil)
         AST::Node.new(type, children, location: location)
       end
@@ -1048,6 +1233,21 @@ module Parser
       # Constructs a new source map for a class definition.
       def smap_definition(keyword, operator, name, end_token)
         Source::Map::Definition.new(keyword, operator, name, end_token)
+      end
+
+      # Constructs a new source map for a for loop.
+      def smap_for(keyword, in_token, begin_token, end_token, expression)
+        Source::Map::For.new(keyword, in_token, begin_token, end_token, expression)
+      end
+
+      # Constructs a new source map for a heredoc.
+      def smap_heredoc(expression, heredoc_body, heredoc_end)
+        Source::Map::Heredoc.new(expression, heredoc_body, heredoc_end)
+      end
+
+      # Construct a source map for an index operation.
+      def smap_index(begin_token, end_token, expression)
+        Source::Map::Index.new(begin_token, end_token, expression)
       end
 
       # Constructs a new source map for the use of a keyword.
@@ -1101,15 +1301,15 @@ module Parser
         Source::Range.new(buffer, location.start_offset, location.end_offset) if location
       end
 
-      # Constructs a new source range by finding the given needle between the
+      # Constructs a new source range by finding the given tokens between the
       # given start offset and end offset. If the needle is not found, it
       # returns nil.
-      def srange_find(start_offset, end_offset, needle)
-        index = buffer.source.byteslice(start_offset...end_offset).index(needle)
-        return unless index
-
-        offset = start_offset + index
-        Source::Range.new(buffer, offset, offset + needle.length)
+      def srange_find(start_offset, end_offset, tokens)
+        tokens.find do |token|
+          next unless (index = buffer.source.byteslice(start_offset...end_offset).index(token))
+          offset = start_offset + index
+          return Source::Range.new(buffer, offset, offset + token.length)
+        end
       end
 
       # Constructs a new source range from the given start and end offsets.
@@ -1117,12 +1317,45 @@ module Parser
         Source::Range.new(buffer, start_offset, end_offset)
       end
 
-      def visit_heredoc(type, parts)
+      # Visit the target of a call operator write node.
+      def visit_call_operator_write(node)
+        target = visit(node)
+
+        case node.name
+        when "[]="
+          s(target.type, target.children, smap_index(srange_offsets(node.message_loc.start_offset, node.message_loc.start_offset + 1), srange_offsets(node.message_loc.end_offset - 1, node.message_loc.end_offset), srange(node.location)))
+        else
+          children = [*target.children]
+          children[1] = children[1].name.chomp("=").to_sym
+          s(target.type, children, smap_send(srange(node.operator_loc), srange(node.message_loc), nil, nil, srange(node.location)))
+        end
+      end
+
+      # Visit a heredoc that can be either a string or an xstring.
+      def visit_heredoc(type, node)
         children = []
-        parts.each do |part|
+        node.parts.each do |part|
           pushing =
             if part.is_a?(::YARP::StringNode) && part.unescaped.count("\n") > 1
-              part.unescaped.split("\n").map { |line| s(:str, ["#{line}\n"]) }
+              unescaped = part.unescaped.split("\n")
+              escaped = part.content.split("\n")
+
+              escaped_lengths =
+                if node.opening.end_with?("'")
+                  escaped.map { |line| line.bytesize + 1 }
+                else
+                  escaped.chunk_while { |before, after| before.match?(/(?<!\\)\\$/) }.map { |line| line.join.bytesize + line.length }
+                end
+
+              start_offset = part.location.start_offset
+              end_offset = nil
+
+              unescaped.zip(escaped_lengths).map do |unescaped_line, escaped_length|
+                end_offset = start_offset + escaped_length
+                s(:str, ["#{unescaped_line}\n"], smap_collection_bare(srange_offsets(start_offset, end_offset))).tap do
+                  start_offset = end_offset
+                end
+              end
             else
               [visit(part)]
             end
@@ -1136,22 +1369,36 @@ module Parser
           end
         end
 
+        location =
+          smap_heredoc(
+            srange(node.location),
+            srange_offsets(srange_find(node.opening_loc.end_offset, node.closing_loc.start_offset, ["\n"]).end_pos, node.closing_loc.start_offset),
+            srange_offsets(node.closing_loc.start_offset, node.closing_loc.end_offset - node.closing[/\s+$/].length)
+          )
+
         if type != :xstr && children.length == 1
-          s(children.first.type, children.first.children)
+          s(children.first.type, children.first.children, location)
         else
-          s(type, children)
+          s(type, children, location)
         end
       end
 
-      def visit_call_operator_write(node)
-        target = visit(node)
-
-        children = [*target.children]
-        children[1] = children[1].name.chomp("=").to_sym
-
-        s(target.type, children, smap_send(srange(node.operator_loc), srange(node.message_loc), nil, nil, srange(node.location)))
+      # Visit a statement at the top level of the file.
+      def visit_top_level(node)
+        if node.is_a?(::YARP::IfNode) && node.predicate.is_a?(::YARP::RegularExpressionNode)
+          visited = visit(node)
+          children = [s(:match_current_line, [visited.children[0]], smap(srange(node.predicate.location))), *visited.children[1..]]
+          s(visited.type, children, visited.location)
+        elsif node.is_a?(::YARP::CallNode) && node.name == "!" && node.receiver.is_a?(::YARP::RegularExpressionNode) && !node.arguments && !node.block
+          visited = visit(node)
+          children = [s(:match_current_line, [visited.children[0]], smap(srange(node.receiver.location))), *visited.children[1..]]
+          s(visited.type, children, visited.location)
+        else
+          visit(node)
+        end
       end
 
+      # Within the given block, set the given context key to the given value.
       def with_context(key, value)
         previous = context[key]
         context[key] = value
@@ -1169,17 +1416,67 @@ module Parser
       ::YARP.parse(buffer.source, buffer.name).value.accept(Visitor.new(buffer))
     end
 
-    # Validate that the visitor has a visit method for each node type and only
-    # those node types.
-    expected = ::YARP.constants.grep(/.Node$/).map(&:name)
-    actual = Visitor.instance_methods(false).grep(/^visit_/).map { _1[6..].split("_").map(&:capitalize).join }
+    # Compare the ASTs between the translator and the whitequark/parser gem.
+    def self.compare(filepath, source = nil)
+      buffer = Source::Buffer.new(filepath, 1)
+      buffer.source = source || File.read(filepath)
 
-    if (extra = actual - expected).any?
-      raise "Unexpected visit methods for: #{extra.join(", ")}"
-    end
+      parser = CurrentRuby.default_parser
+      parser.diagnostics.consumer = ->(*) {}
+      parser.diagnostics.all_errors_are_fatal = true
 
-    if (missing = expected - actual).any?
-      raise "Missing visit methods for: #{missing.join(", ")}"
+      expected = parser.parse(buffer)
+      actual = parse(buffer)
+      return true if expected == actual
+
+      puts filepath
+      queue = [[expected, actual]]
+
+      while (left, right = queue.shift)
+        if left.type != right.type
+          puts "expected:"
+          pp left
+    
+          puts "actual:"
+          pp right
+    
+          return false
+        end
+    
+        if left.location != right.location
+          puts "expected:"
+          pp left
+          pp left.location
+    
+          puts "actual:"
+          pp right
+          pp right.location
+    
+          return false
+        end
+    
+        left.children.zip(right.children).each do |left_child, right_child|
+          queue << [left_child, right_child] if left_child.is_a?(Parser::AST::Node)
+        end
+      end
+
+      false
     end
   end
+end
+
+# Validate that the visitor has a visit method for each node type and only those
+# node types.
+expected = YARP.constants.grep(/.Node$/).map(&:name)
+actual =
+  Parser::YARP::Visitor.instance_methods(false).grep(/^visit_/).map do
+    _1[6..].split("_").map(&:capitalize).join
+  end
+
+if (extra = actual - expected).any?
+  raise "Unexpected visit methods for: #{extra.join(", ")}"
+end
+
+if (missing = expected - actual).any?
+  raise "Missing visit methods for: #{missing.join(", ")}"
 end
