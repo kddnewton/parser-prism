@@ -3,6 +3,14 @@
 require "parser"
 require "yarp"
 
+module YARP
+  class Location
+    def to(other)
+      Location.new(source, start_offset, other.end_offset)
+    end
+  end
+end
+
 module Parser
   module YARP
     class Visitor < ::YARP::BasicVisitor
@@ -48,6 +56,8 @@ module Parser
         end
       end
 
+      # { a: 1 }
+      #   ^^^^
       def visit_assoc_node(node)
         if context[:pattern] && node.value.nil?
           s(:match_var, [node.key.unescaped.to_sym])
@@ -264,8 +274,10 @@ module Parser
         s(:ensure, [visit(node.statements)])
       end
 
+      # false
+      # ^^^^^
       def visit_false_node(node)
-        s(:false)
+        s(:false, [], smap(srange(node.location)))
       end
 
       def visit_find_pattern_node(node)
@@ -276,8 +288,10 @@ module Parser
         s(node.exclude_end? ? :eflipflop : :iflipflop, [visit(node.left), visit(node.right)])
       end
 
+      # 1.0
+      # ^^^
       def visit_float_node(node)
-        s(:float, [Float(node.slice)])
+        s(:float, [Float(node.slice)], smap_operator(nil, srange(node.location)))
       end
 
       def visit_for_node(node)
@@ -292,24 +306,39 @@ module Parser
         s(:forward_arg)
       end
 
+      # super
+      # ^^^^^
+      #
+      # super {}
+      # ^^^^^^^^
       def visit_forwarding_super_node(node)
         if node.block
-          s(:block, [s(:zsuper)].concat(visit(node.block)))
+          s(:block, [s(:zsuper, [], smap_keyword_bare(srange_offsets(node.location.start_offset, node.location.start_offset + 5), srange_offsets(node.location.start_offset, node.location.start_offset + 5)))].concat(visit(node.block)), smap_collection(srange(node.block.opening_loc), srange(node.block.closing_loc), srange(node.location)))
         else
-          s(:zsuper)
+          s(:zsuper, [], smap_keyword_bare(srange(node.location), srange(node.location)))
         end
       end
 
+      # $foo
+      # ^^^^
       def visit_global_variable_read_node(node)
-        s(:gvar, [node.slice.to_sym])
+        s(:gvar, [node.slice.to_sym], smap_variable(srange(node.location), srange(node.location)))
       end
 
+      # $foo = 1
+      # ^^^^^^^^
       def visit_global_variable_write_node(node)
-        s(:gvasgn, [node.name.to_sym, visit(node.value)])
+        if node.value
+          s(:gvasgn, [node.name.to_sym, visit(node.value)], smap_variable(srange(node.name_loc), srange(node.location)).with_operator(srange(node.operator_loc)))
+        else
+          s(:gvasgn, [node.name.to_sym], smap_variable(srange(node.name_loc), srange(node.location)))
+        end
       end
 
+      # {}
+      # ^^
       def visit_hash_node(node)
-        s(:hash, visit_all(node.elements))
+        s(:hash, visit_all(node.elements), smap_collection(srange(node.opening_loc), srange(node.closing_loc), srange(node.location)))
       end
 
       def visit_hash_pattern_node(node)
@@ -340,8 +369,10 @@ module Parser
         end
       end
 
+      # 1
+      # ^
       def visit_integer_node(node)
-        s(:int, [Integer(node.slice)])
+        s(:int, [Integer(node.slice)], smap_operator(nil, srange(node.location)))
       end
 
       def visit_interpolated_regular_expression_node(node)
@@ -370,7 +401,9 @@ module Parser
         end
       end
 
-      alias visit_keyword_hash_node visit_hash_node
+      def visit_keyword_hash_node(node)
+        s(:hash, visit_all(node.elements), smap_collection_bare(srange(node.location)))
+      end
 
       def visit_keyword_parameter_node(node)
         if node.value
@@ -424,7 +457,7 @@ module Parser
         elsif node.value.nil?
           s(:mlhs, visit_all(node.targets))
         else
-          s(:masgn, [s(:mlhs, visit_all(node.targets)), visit(node.value)])
+          s(:masgn, [s(:mlhs, visit_all(node.targets), smap_collection_bare(srange(node.targets.first.location.to(node.targets.last.location)))), visit(node.value)], smap_operator(srange(node.operator_loc), srange(node.location)))
         end
       end
 
@@ -432,8 +465,10 @@ module Parser
         s(:next, visit(node.arguments))
       end
 
+      # nil
+      # ^^^
       def visit_nil_node(node)
-        s(:nil)
+        s(:nil, [], smap(srange(node.location)))
       end
 
       def visit_no_keywords_parameter_node(node)
@@ -489,28 +524,37 @@ module Parser
         raise NotImplementedError
       end
 
+      # END {}
       def visit_post_execution_node(node)
-        s(:postexe, [visit(node.statements)])
+        s(:postexe, [visit(node.statements)], smap_keyword(srange(node.keyword_loc), srange(node.opening_loc), srange(node.closing_loc), srange(node.location)))
       end
 
+      # BEGIN {}
       def visit_pre_execution_node(node)
-        s(:preexe, [visit(node.statements)])
+        s(:preexe, [visit(node.statements)], smap_keyword(srange(node.keyword_loc), srange(node.opening_loc), srange(node.closing_loc), srange(node.location)))
       end
 
+      # The top-level program node.
       def visit_program_node(node)
         visit(node.statements)
       end
 
+      # 0..5
+      # ^^^^
       def visit_range_node(node)
-        s(node.exclude_end? ? :erange : :irange, [visit(node.left), visit(node.right)])
+        s(node.exclude_end? ? :erange : :irange, [visit(node.left), visit(node.right)], smap_operator(srange(node.operator_loc), srange(node.location)))
       end
 
+      # 1r
+      # ^^
       def visit_rational_node(node)
-        s(:rational, [Rational(node.slice.chomp("r"))])
+        s(:rational, [Rational(node.slice.chomp("r"))], smap_operator(nil, srange(node.location)))
       end
 
+      # redo
+      # ^^^^
       def visit_redo_node(node)
-        s(:redo)
+        s(:redo, [], smap_keyword_bare(srange(node.location), srange(node.location)))
       end
 
       def visit_regular_expression_node(node)
@@ -554,16 +598,20 @@ module Parser
         end
       end
 
+      # retry
+      # ^^^^^
       def visit_retry_node(node)
-        s(:retry)
+        s(:retry, [], smap_keyword_bare(srange(node.location), srange(node.location)))
       end
 
       def visit_return_node(node)
         s(:return, visit(node.arguments))
       end
 
+      # self
+      # ^^^^
       def visit_self_node(node)
-        s(:self)
+        s(:self, [], smap(srange(node.location)))
       end
 
       def visit_singleton_class_node(node)
@@ -620,8 +668,10 @@ module Parser
         s(:sym, [node.unescaped.to_sym])
       end
 
+      # true
+      # ^^^^
       def visit_true_node(node)
-        s(:true)
+        s(:true, [], smap(srange(node.location)))
       end
 
       def visit_undef_node(node)
@@ -660,6 +710,52 @@ module Parser
 
       def s(type, children = [], location = nil)
         AST::Node.new(type, children, location: location)
+      end
+
+      # Constructs a plain source map just for an expression.
+      def smap(expression)
+        Source::Map.new(expression)
+      end
+
+      # Constructs a new source map for a collection.
+      def smap_collection(begin_token, end_token, expression)
+        Source::Map::Collection.new(begin_token, end_token, expression)
+      end
+
+      # Constructs a new source map for a collection without a begin or end.
+      def smap_collection_bare(expression)
+        smap_collection(nil, nil, expression)
+      end
+
+      # Constructs a new source map for the use of a keyword.
+      def smap_keyword(keyword, begin_token, end_token, expression)
+        Source::Map::Keyword.new(keyword, begin_token, end_token, expression)
+      end
+
+      # Constructs a new source map for the use of a keyword without a begin or
+      # end token.
+      def smap_keyword_bare(keyword, expression)
+        smap_keyword(keyword, nil, nil, expression)
+      end
+
+      # Constructs a new source map for an operator.
+      def smap_operator(operator, expression)
+        Source::Map::Operator.new(operator, expression)
+      end
+
+      # Constructs a new source map for a variable.
+      def smap_variable(name, expression)
+        Source::Map::Variable.new(name, expression)
+      end
+
+      # Constructs a new source range from the given start and end offsets.
+      def srange(location)
+        Source::Range.new(buffer, location.start_offset, location.end_offset)
+      end
+
+      # Constructs a new source range from the given start and end offsets.
+      def srange_offsets(start_offset, end_offset)
+        Source::Range.new(buffer, start_offset, end_offset)
       end
 
       def visit_heredoc(type, parts)
