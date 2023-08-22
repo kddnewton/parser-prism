@@ -1,10 +1,11 @@
 # frozen_string_literal: true
 
 require "bundler/setup"
-require "test/unit"
-
 $:.unshift(File.expand_path("../lib", __dir__))
+
+require "test/unit"
 require "parser/yarp"
+require "parser/yarp/compare"
 
 class YARPTest < Test::Unit::TestCase
   skip = [

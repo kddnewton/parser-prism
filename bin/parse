@@ -3,7 +3,9 @@
 
 require "bundler/setup"
 $:.unshift(File.expand_path("../lib", __dir__))
+
 require "parser/yarp"
+require "parser/yarp/compare"
 
 if ARGV[0].nil?
   filepaths = Dir[File.expand_path("../test/fixtures/*.rb", __dir__)]
