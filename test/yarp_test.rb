@@ -41,11 +41,38 @@ class YARPTest < Test::Unit::TestCase
     "dedenting_heredoc.rb"
   ]
 
+  # We haven't fully implemented tokenization properly yet. Most of these are
+  # heredocs, and a couple are just random bugs.
+  skip_tokens = [
+    "args.rb",
+    "beginless_erange_after_newline.rb",
+    "beginless_irange_after_newline.rb",
+    "beginless_range.rb",
+    "bug_ascii_8bit_in_literal.rb",
+    "bug_heredoc_do.rb",
+    "dedenting_interpolating_heredoc_fake_line_continuation.rb",
+    "dedenting_non_interpolating_heredoc_line_continuation.rb",
+    "forward_arg_with_open_args.rb",
+    "heredoc.rb",
+    "interp_digit_var.rb",
+    "multiple_pattern_matches.rb",
+    "newline_in_hash_argument.rb",
+    "parser_bug_640.rb",
+    "parser_drops_truncated_parts_of_squiggly_heredoc.rb",
+    "ruby_bug_11990.rb",
+    "ruby_bug_9669.rb",
+    "slash_newline_in_heredocs.rb"
+  ]
+
   base = File.expand_path("fixtures", __dir__)
   Dir["*.rb", base: base].each do |filename|
     next if skip.include?(filename)
 
     filepath = File.join(base, filename)
-    define_method("test_#{filepath}") { assert(Parser::YARP.compare(filepath)) }
+    compare_tokens = !skip_tokens.include?(filename)
+
+    define_method("test_#{filepath}") do
+      assert(Parser::YARP.compare(filepath, compare_tokens: compare_tokens))
+    end
   end
 end

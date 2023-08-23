@@ -31,7 +31,7 @@ Parser::AST::Node.prepend(
 module Parser
   module YARP
     # Compare the ASTs between the translator and the whitequark/parser gem.
-    def self.compare(filepath, source = nil)
+    def self.compare(filepath, source = nil, compare_tokens: true)
       buffer = Source::Buffer.new(filepath, 1)
       buffer.source = source || File.read(filepath)
 
@@ -39,42 +39,94 @@ module Parser
       parser.diagnostics.consumer = ->(*) {}
       parser.diagnostics.all_errors_are_fatal = true
 
-      expected = parser.parse(buffer)
-      actual = parse(buffer)
-      return true if expected == actual
+      expected_ast, expected_comments, expected_tokens = parser.tokenize(buffer)
+      actual_ast, actual_comments, actual_tokens = tokenize(buffer)
 
-      puts filepath
-      queue = [[expected, actual]]
+      if compare_tokens && expected_tokens != actual_tokens
+        expected_index = 0
+        actual_index = 0
 
-      while (left, right = queue.shift)
-        if left.type != right.type
-          puts "expected:"
-          pp left
+        while expected_index < expected_tokens.length
+          expected_token = expected_tokens[expected_index]
+          actual_token = actual_tokens[actual_index]
 
-          puts "actual:"
-          pp right
+          expected_index += 1
+          actual_index += 1
 
-          return false
-        end
+          if expected_token[0] == :tSPACE && actual_token[0] == :tSTRING_END
+            expected_index += 1
+            next
+          end
 
-        if left.location != right.location
-          puts "expected:"
-          pp left
-          pp left.location
+          case actual_token[0]
+          when :kDO
+            actual_token[0] = expected_token[0] if %i[kDO_BLOCK kDO_LAMBDA].include?(expected_token[0])
+          when :tLPAREN
+            actual_token[0] = expected_token[0] if expected_token[0] == :tLPAREN2
+          when :tLCURLY
+            actual_token[0] = expected_token[0] if %i[tLBRACE tLBRACE_ARG].include?(expected_token[0])
+          when :tPOW
+            actual_token[0] = expected_token[0] if expected_token[0] == :tDSTAR
+          end
 
-          puts "actual:"
-          pp right
-          pp right.location
+          if expected_token != actual_token
+            puts "expected:"
+            pp expected_token
 
-          return false
-        end
+            puts "actual:"
+            pp actual_token
 
-        left.children.zip(right.children).each do |left_child, right_child|
-          queue << [left_child, right_child] if left_child.is_a?(Parser::AST::Node)
+            return false
+          end
         end
       end
 
-      false
+      if expected_comments != actual_comments
+        puts "expected:"
+        pp expected_comments
+
+        puts "actual:"
+        pp actual_comments
+
+        return false
+      end
+
+      if expected_ast != actual_ast
+        puts filepath
+        queue = [[expected_ast, actual_ast]]
+
+        while (left, right = queue.shift)
+          if left.type != right.type
+            puts "expected:"
+            pp left
+
+            puts "actual:"
+            pp right
+
+            return false
+          end
+
+          if left.location != right.location
+            puts "expected:"
+            pp left
+            pp left.location
+
+            puts "actual:"
+            pp right
+            pp right.location
+
+            return false
+          end
+
+          left.children.zip(right.children).each do |left_child, right_child|
+            queue << [left_child, right_child] if left_child.is_a?(Parser::AST::Node)
+          end
+        end
+
+        return false
+      end
+
+      true
     end
   end
 end
