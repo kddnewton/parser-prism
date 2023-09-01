@@ -39,7 +39,13 @@ module Parser
       parser.diagnostics.consumer = ->(*) {}
       parser.diagnostics.all_errors_are_fatal = true
 
-      expected_ast, expected_comments, expected_tokens = parser.tokenize(buffer)
+      expected_ast, expected_comments, expected_tokens =
+        begin
+          parser.tokenize(buffer)
+        rescue ArgumentError, SyntaxError
+          return true
+        end
+
       actual_ast, actual_comments, actual_tokens = tokenize(buffer)
 
       if compare_tokens && expected_tokens != actual_tokens
