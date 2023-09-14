@@ -48,6 +48,41 @@ module Parser
 
       actual_ast, actual_comments, actual_tokens = tokenize(buffer)
 
+      if expected_ast != actual_ast
+        puts filepath
+        queue = [[expected_ast, actual_ast]]
+
+        while (left, right = queue.shift)
+          if left.type != right.type
+            puts "expected:"
+            pp left
+
+            puts "actual:"
+            pp right
+
+            return false
+          end
+
+          if left.location != right.location
+            puts "expected:"
+            pp left
+            pp left.location
+
+            puts "actual:"
+            pp right
+            pp right.location
+
+            return false
+          end
+
+          left.children.zip(right.children).each do |left_child, right_child|
+            queue << [left_child, right_child] if left_child.is_a?(Parser::AST::Node)
+          end
+        end
+
+        return false
+      end
+
       if compare_tokens && expected_tokens != actual_tokens
         expected_index = 0
         actual_index = 0
@@ -93,41 +128,6 @@ module Parser
 
         puts "actual:"
         pp actual_comments
-
-        return false
-      end
-
-      if expected_ast != actual_ast
-        puts filepath
-        queue = [[expected_ast, actual_ast]]
-
-        while (left, right = queue.shift)
-          if left.type != right.type
-            puts "expected:"
-            pp left
-
-            puts "actual:"
-            pp right
-
-            return false
-          end
-
-          if left.location != right.location
-            puts "expected:"
-            pp left
-            pp left.location
-
-            puts "actual:"
-            pp right
-            pp right.location
-
-            return false
-          end
-
-          left.children.zip(right.children).each do |left_child, right_child|
-            queue << [left_child, right_child] if left_child.is_a?(Parser::AST::Node)
-          end
-        end
 
         return false
       end

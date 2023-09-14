@@ -10,7 +10,7 @@ GEM
     rake (13.0.6)
     test-unit (3.6.1)
       power_assert
-    yarp (0.9.0)
+    yarp (0.11.0)
 
 PLATFORMS
   arm64-darwin-22
@@ -19,7 +19,7 @@ DEPENDENCIES
   parser
   rake
   test-unit
-  yarp (~> 0.9)
+  yarp (~> 0.11)
 
 BUNDLED WITH
    2.4.12
