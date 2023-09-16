@@ -78,18 +78,6 @@ module Parser
       def visit_assoc_node(node)
         if context[:pattern] && node.value.nil?
           s(:match_var, [node.key.unescaped.to_sym], smap_variable(srange(node.key.value_loc), srange(node.key.location)))
-        elsif node.value.nil?
-          key_name = node.key.unescaped.to_sym
-          key_location = srange_offsets(node.key.location.start_offset, node.key.location.end_offset - 1)
-
-          key_value =
-            if key_name[0].match?(/[[:upper:]]/)
-              s(:const, [nil, key_name], smap_constant(nil, key_location, key_location))
-            else
-              s(:send, [nil, key_name], smap_send_bare(key_location, key_location))
-            end
-
-          s(:pair, [s(:sym, [key_name], smap_collection_bare(key_location)), key_value], smap_operator(srange(node.key.closing_loc), srange(node.location)))
         elsif node.key.is_a?(::YARP::SymbolNode) && node.key.closing&.end_with?(":")
           visited = visit(node.key)
           s(:pair, [s(visited.type, visited.children, smap_collection(srange(node.key.opening_loc), node.key.closing_loc.start_offset == node.key.closing_loc.end_offset - 1 ? nil : srange_offsets(node.key.closing_loc.start_offset, node.key.closing_loc.end_offset - 1), srange_offsets(node.key.location.start_offset, node.key.location.end_offset - 1))), visit(node.value)], smap_operator(srange_offsets(node.key.closing_loc.end_offset - 1, node.key.closing_loc.end_offset), srange(node.location)))
@@ -221,9 +209,7 @@ module Parser
       # foo.bar() {}
       # ^^^^^^^^^^^^
       def visit_call_node(node)
-        if node.message == "=~" && node.receiver.is_a?(::YARP::RegularExpressionNode) && node.arguments && node.arguments.arguments.length == 1
-          return s(:match_with_lvasgn, [visit(node.receiver), visit(node.arguments.arguments.first)], smap_send_bare(srange(node.message_loc), srange(node.location)))
-        elsif node.message == "not" && !node.receiver && node.opening_loc && node.closing_loc && !node.arguments
+        if node.message == "not" && !node.receiver && node.opening_loc && node.closing_loc && !node.arguments
           return s(:send, [s(:begin, [], smap_collection(srange(node.opening_loc), srange(node.closing_loc), srange(node.opening_loc.join(node.closing_loc)))), :!], smap_send_bare(srange(node.message_loc), srange(node.location)))
         end
 
@@ -674,6 +660,25 @@ module Parser
         s(:complex, [node.value], smap_operator(nil, srange(node.location)))
       end
 
+      # { foo: }
+      #   ^^^^
+      def visit_implicit_node(node)
+        visited = visit(node.value)
+
+        range = srange_offsets(node.location.start_offset, node.location.end_offset - 1)
+        location =
+          case node.value
+          when ::YARP::ConstantReadNode
+            smap_constant(nil, range, range)
+          when ::YARP::LocalVariableReadNode
+            smap_variable(range, range)
+          when ::YARP::CallNode
+            smap_send_bare(range, range)
+          end
+
+        s(visited.type, visited.children, location)
+      end
+
       # case foo; in bar; end
       # ^^^^^^^^^^^^^^^^^^^^^
       def visit_in_node(node)
@@ -857,6 +862,12 @@ module Parser
       # ^^^^^^^^^^
       def visit_match_required_node(node)
         s(:match_pattern, [visit(node.value), with_context(:pattern, true) { visit(node.pattern) }], smap_operator(srange(node.operator_loc), srange(node.location)))
+      end
+
+      # /(?<foo>foo)/ =~ bar
+      # ^^^^^^^^^^^^^^^^^^^^
+      def visit_match_write_node(node)
+        s(:match_with_lvasgn, [visit(node.call.receiver), visit(node.call.arguments.arguments.first)], smap_send_bare(srange(node.call.message_loc), srange(node.call.location)))
       end
 
       # A node that is missing from the syntax tree. This is only used in the
@@ -1257,7 +1268,7 @@ module Parser
       # ^^^^^
       def visit_x_string_node(node)
         if node.opening&.start_with?("<<")
-          visit_heredoc(:xstr, ::YARP::InterpolatedXStringNode.new(node.opening_loc, [::YARP::StringNode.new(nil, node.content_loc, nil, node.unescaped, node.content_loc)], node.closing_loc, node.location))
+          visit_heredoc(:xstr, ::YARP::InterpolatedXStringNode.new(node.opening_loc, [::YARP::StringNode.new(0, nil, node.content_loc, nil, node.unescaped, node.content_loc)], node.closing_loc, node.location))
         else
           s(:xstr, [s(:str, [node.unescaped], smap_collection_bare(srange(node.content_loc)))], smap_collection(srange(node.opening_loc), srange(node.closing_loc), srange(node.location)))
         end
@@ -1526,10 +1537,7 @@ module Parser
 
       comments =
         result.comments.map do |comment|
-          end_offset = comment.location.end_offset
-          end_offset -= 1 if comment.type == :inline
-
-          Source::Comment.new(Source::Range.new(buffer, comment.location.start_offset, end_offset))
+          Source::Comment.new(Source::Range.new(buffer, comment.location.start_offset, comment.location.end_offset))
         end
 
       tokens = []
