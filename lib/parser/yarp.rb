@@ -1301,16 +1301,15 @@ module Parser
            parameters.posts.empty? &&
            parameters.keywords.empty? &&
            parameters.keyword_rest.nil? &&
-           parameters.block.nil? &&
-           block_parameters.locals.empty?
+           parameters.block.nil?
 
           location = smap_collection(srange(block_parameters.opening_loc), srange(block_parameters.closing_loc), srange(block_parameters.location))
 
           if parameter.is_a?(::YARP::RequiredParameterNode)
-            s(:args, [s(:procarg0, [visit(parameter)], smap_collection_bare(srange(parameter.location)))], location)
+            s(:args, [s(:procarg0, [visit(parameter)], smap_collection_bare(srange(parameter.location)))].concat(visit_all(block_parameters.locals)), location)
           else
             visited = visit(parameter)
-            s(:args, [s(:procarg0, visited.children, visited.location)], location)
+            s(:args, [s(:procarg0, visited.children, visited.location)].concat(visit_all(block_parameters.locals)), location)
           end
         end
       end
