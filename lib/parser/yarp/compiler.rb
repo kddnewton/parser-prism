@@ -1,37 +1,38 @@
 # frozen_string_literal: true
 
 module Parser
-  module YARP
+  class YARP
     class Compiler < ::YARP::BasicVisitor
-      attr_reader :buffer, :context
+      attr_reader :buffer, :builder, :context
 
-      def initialize(buffer)
+      def initialize(buffer, builder)
         @buffer = buffer
+        @builder = builder
         @context = { destructure: false, locals: [], pattern: false }
       end
 
       # alias foo bar
       # ^^^^^^^^^^^^^
       def visit_alias_method_node(node)
-        s(:alias,  [visit(node.new_name), visit(node.old_name)], smap_keyword_bare(srange(node.keyword_loc), srange(node.location)))
+        builder.alias(["alias", srange(node.keyword_loc)], visit(node.new_name), visit(node.old_name))
       end
 
       # alias $foo $bar
       # ^^^^^^^^^^^^^^^
       def visit_alias_global_variable_node(node)
-        s(:alias,  [visit(node.new_name), visit(node.old_name)], smap_keyword_bare(srange(node.keyword_loc), srange(node.location)))
+        builder.alias(["alias", srange(node.keyword_loc)], visit(node.new_name), visit(node.old_name))
       end
 
       # foo => bar | baz
       #        ^^^^^^^^^
       def visit_alternation_pattern_node(node)
-        s(:match_alt, [visit(node.left), visit(node.right)], smap_operator(srange(node.operator_loc), srange(node.location)))
+        builder.match_alt(visit(node.left), ["|", srange(node.operator_loc)], visit(node.right))
       end
 
       # a and b
       # ^^^^^^^
       def visit_and_node(node)
-        s(:and, [visit(node.left), visit(node.right)], smap_operator(srange(node.operator_loc), srange(node.location)))
+        builder.logical_op(:and, visit(node.left), ["and", srange(node.operator_loc)], visit(node.right))
       end
 
       # []

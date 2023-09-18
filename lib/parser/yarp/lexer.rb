@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Parser
-  module YARP
+  class YARP
     # Accepts a list of YARP tokens and converts them into the expected format
     # for the parser gem.
     class Lexer
