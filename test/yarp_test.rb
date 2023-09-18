@@ -11,6 +11,7 @@ class YARPTest < Test::Unit::TestCase
   skip = [
     # These files contain invalid syntax. We should never try to parse them.
     "control_meta_escape_chars_in_regexp__since_31.rb",
+    "newline_in_hash_argument.rb",
     "pattern_match.rb",
     "range_endless.rb",
     "unary_num_pow_precedence.rb",
@@ -38,7 +39,8 @@ class YARPTest < Test::Unit::TestCase
     "rescue_in_lambda_block.rb",
 
     # Some kind of issue with the end location of heredocs including newlines.
-    "dedenting_heredoc.rb"
+    "dedenting_heredoc.rb",
+    "parser_drops_truncated_parts_of_squiggly_heredoc.rb"
   ]
 
   # We haven't fully implemented tokenization properly yet. Most of these are

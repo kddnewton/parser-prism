@@ -83,7 +83,7 @@ module Parser
         return false
       end
 
-      if false && compare_tokens && expected_tokens != actual_tokens
+      if compare_tokens && expected_tokens != actual_tokens
         expected_index = 0
         actual_index = 0
 
@@ -122,7 +122,7 @@ module Parser
         end
       end
 
-      if false && expected_comments != actual_comments
+      if expected_comments != actual_comments
         puts "expected:"
         pp expected_comments
 
