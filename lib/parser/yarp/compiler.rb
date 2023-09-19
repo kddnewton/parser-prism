@@ -111,16 +111,15 @@ module Parser
 
         if (rescue_clause = node.rescue_clause)
           begin
+            find_start_offset = (rescue_clause.reference&.location || rescue_clause.exceptions.last&.location || rescue_clause.keyword_loc).end_offset
+            find_end_offset = (rescue_clause.statements&.location&.start_offset || rescue_clause.consequent&.location&.start_offset || (find_start_offset + 1))
+
             rescue_bodies << builder.rescue_body(
               token(rescue_clause.keyword_loc),
               rescue_clause.exceptions.any? ? builder.array(nil, visit_all(rescue_clause.exceptions), nil) : nil,
               token(rescue_clause.operator_loc),
               visit(rescue_clause.reference),
-              srange_find(
-                (rescue_clause.reference&.location || rescue_clause.exceptions.last&.location || rescue_clause.keyword_loc).end_offset,
-                (rescue_clause.statements&.location&.start_offset || rescue_clause.consequent&.location&.start_offset || (find_start_offset + 1)),
-                [";"]
-              ),
+              srange_find(find_start_offset, find_end_offset, [";"]),
               visit(rescue_clause.statements)
             )
           end until (rescue_clause = rescue_clause.consequent).nil?
