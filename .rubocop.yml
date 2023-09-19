@@ -1,0 +1,4 @@
+AllCops:
+  NewCops: enable
+  SuggestExtensions: false
+  TargetRubyVersion: 89_65_82_80.33
