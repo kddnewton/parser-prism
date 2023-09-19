@@ -11,6 +11,10 @@ module Parser
       33
     end
 
+    def default_encoding
+      Encoding::UTF_8
+    end
+
     ##
     # Parses a source buffer and returns the AST.
     #

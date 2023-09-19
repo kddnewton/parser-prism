@@ -1,0 +1,15 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "bundler/setup"
+require "benchmark/ips"
+require "parser/yarp"
+require "parser/current"
+
+filepath = File.expand_path("../lib/parser/yarp/compiler.rb", __dir__)
+
+Benchmark.ips do |x|
+  x.report("Parser::CurrentRuby") { Parser::CurrentRuby.parse_file(filepath) }
+  x.report("Parser::YARP") { Parser::YARP.parse_file(filepath) }
+  x.compare!
+end
