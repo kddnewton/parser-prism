@@ -76,10 +76,12 @@ module Parser
     end
 
     def build_comments(comments)
-      comments.map do |comment|
+      comments.each_with_object([]) do |comment, result|
+        next if comment.type == :__END__
+
         location = comment.location
         range = Source::Range.new(source_buffer, location.start_offset, location.end_offset)
-        Source::Comment.new(range)
+        result << Source::Comment.new(range)
       end
     end
 
