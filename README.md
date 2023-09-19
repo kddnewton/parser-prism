@@ -49,6 +49,40 @@ bundle exec ruby -rparser/yarp/rubocop $(bundle exec which rubocop)
 
 This should run RuboCop using the `YARP` parser.
 
+## Benchmarks
+
+As a whole, this parser should be significantly faster than the `parser` gem. The `bin/bench` script in this repository compares the performance of `Parser::CurrentRuby` and `Parser::YARP`. Running against a large file like `lib/parser/yarp/compiler.rb` yields:
+
+```
+Warming up --------------------------------------
+ Parser::CurrentRuby     1.000  i/100ms
+        Parser::YARP     6.000  i/100ms
+Calculating -------------------------------------
+ Parser::CurrentRuby     17.184  (± 0.0%) i/s -     86.000  in   5.006166s
+        Parser::YARP     68.121  (± 2.9%) i/s -    342.000  in   5.023905s
+
+Comparison:
+        Parser::YARP:       68.1 i/s
+ Parser::CurrentRuby:       17.2 i/s - 3.96x  slower
+```
+
+When running with `--yjit`, the comparison is even more stark:
+
+```
+Warming up --------------------------------------
+ Parser::CurrentRuby     1.000  i/100ms
+        Parser::YARP     9.000  i/100ms
+Calculating -------------------------------------
+ Parser::CurrentRuby     19.570  (± 5.1%) i/s -     98.000  in   5.016435s
+        Parser::YARP    109.392  (± 4.6%) i/s -    549.000  in   5.032282s
+
+Comparison:
+        Parser::YARP:      109.4 i/s
+ Parser::CurrentRuby:       19.6 i/s - 5.59x  slower
+```
+
+These benchmarks were run on a single laptop without a lot of control for other processes, so take them with a grain of salt.
+
 ## Development
 
 Run `rake test` to run the tests. This runs tests exported from the `parser` gem into their own fixture files.

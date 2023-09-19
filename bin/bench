@@ -6,7 +6,7 @@ require "benchmark/ips"
 require "parser/yarp"
 require "parser/current"
 
-filepath = File.expand_path("../lib/parser/yarp/compiler.rb", __dir__)
+filepath = ARGV.fetch(0) { File.expand_path("../lib/parser/yarp/compiler.rb", __dir__) }
 
 Benchmark.ips do |x|
   x.report("Parser::CurrentRuby") { Parser::CurrentRuby.parse_file(filepath) }
