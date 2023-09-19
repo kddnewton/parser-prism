@@ -5,7 +5,7 @@ require "rubocop"
 
 module Parser
   class YARP < Base
-    VERSION_3_3 = 24_00_17_15.33
+    VERSION_3_3 = 89_65_82_80.33
   end
 end
 
