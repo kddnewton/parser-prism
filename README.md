@@ -56,14 +56,14 @@ As a whole, this parser should be significantly faster than the `parser` gem. Th
 ```
 Warming up --------------------------------------
  Parser::CurrentRuby     1.000  i/100ms
-        Parser::Prism    6.000  i/100ms
+       Parser::Prism     6.000  i/100ms
 Calculating -------------------------------------
- Parser::CurrentRuby     17.184  (± 0.0%) i/s -     86.000  in   5.006166s
-        Parser::Prism    68.121  (± 2.9%) i/s -    342.000  in   5.023905s
+ Parser::CurrentRuby     16.642  (± 0.0%) i/s -     84.000  in   5.052021s
+       Parser::Prism     64.951  (± 3.1%) i/s -    330.000  in   5.088147s
 
 Comparison:
-        Parser::Prism:      68.1 i/s
- Parser::CurrentRuby:       17.2 i/s - 3.96x  slower
+       Parser::Prism:       65.0 i/s
+ Parser::CurrentRuby:       16.6 i/s - 3.90x  slower
 ```
 
 When running with `--yjit`, the comparison is even more stark:
@@ -71,14 +71,14 @@ When running with `--yjit`, the comparison is even more stark:
 ```
 Warming up --------------------------------------
  Parser::CurrentRuby     1.000  i/100ms
-        Parser::Prism    9.000  i/100ms
+       Parser::Prism     9.000  i/100ms
 Calculating -------------------------------------
- Parser::CurrentRuby     19.570  (± 5.1%) i/s -     98.000  in   5.016435s
-        Parser::Prism    109.392  (± 4.6%) i/s -    549.000  in   5.032282s
+ Parser::CurrentRuby     20.062  (± 0.0%) i/s -    101.000  in   5.034389s
+       Parser::Prism    112.823  (± 9.7%) i/s -    558.000  in   5.009460s
 
 Comparison:
-        Parser::Prism:     109.4 i/s
- Parser::CurrentRuby:       19.6 i/s - 5.59x  slower
+       Parser::Prism:      112.8 i/s
+ Parser::CurrentRuby:       20.1 i/s - 5.62x  slower
 ```
 
 These benchmarks were run on a single laptop without a lot of control for other processes, so take them with a grain of salt.
