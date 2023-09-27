@@ -34,11 +34,11 @@ Parser::Prism.parse_file("path/to/file.rb")
 
 To run RuboCop using the `parser-prism` gem as the parser, you will need to require the `parser/prism/rubocop` file. This file injects `prism` into the known options for both `rubocop` and `rubocop-ast`, such that you can specify it in your `.rubocop.yml` file. Unfortunately `rubocop` doesn't support any direct way to do this, so we have to get a bit hacky.
 
-First, set the `TargetRubyVersion` in your RuboCop configuration file to `89_65_82_80.33`. This is the version of Ruby that `prism` reports itself as. (The leading numbers are the ASCII values for `PRISM`.)
+First, set the `TargetRubyVersion` in your RuboCop configuration file to `80_82_73_83_77.33`. This is the version of Ruby that `prism` reports itself as. (The leading numbers are the ASCII values for `PRISM`.)
 
 ```yaml
 AllCops:
-  TargetRubyVersion: 89_65_82_80.33
+  TargetRubyVersion: 80_82_73_83_77.33
 ```
 
 Now when you run `rubocop` you will need to require the `parser/prism/rubocop` file before executing so that it can inject the `prism` parser into the known options.

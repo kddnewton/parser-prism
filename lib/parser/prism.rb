@@ -15,6 +15,9 @@ module Parser
       Encoding::UTF_8
     end
 
+    def yyerror
+    end
+
     ##
     # Parses a source buffer and returns the AST.
     #

@@ -68,7 +68,11 @@ module Parser
         if node.value.is_a?(::Prism::ImplicitNode)
           builder.pair_label([node.key.slice.chomp(":"), srange(node.key.location)])
         elsif context_pattern && node.value.nil?
-          builder.match_hash_var([node.key.unescaped, srange(node.key.location)])
+          if node.key.is_a?(::Prism::SymbolNode)
+            builder.match_hash_var([node.key.unescaped, srange(node.key.location)])
+          else
+            builder.match_hash_var_from_str(token(node.key.opening_loc), visit_all(node.key.parts), token(node.key.closing_loc))
+          end
         elsif node.operator_loc
           builder.pair(visit(node.key), token(node.operator_loc), visit(node.value))
         elsif node.key.is_a?(::Prism::SymbolNode) && node.key.opening_loc.nil?
@@ -78,7 +82,7 @@ module Parser
             if node.key.is_a?(::Prism::SymbolNode)
               [builder.string_internal([node.key.unescaped, srange(node.key.value_loc)])]
             else
-              visit_all(node,key.parts)
+              visit_all(node.key.parts)
             end
 
           builder.pair_quoted(token(node.key.opening_loc), parts, token(node.key.closing_loc), visit(node.value))
@@ -757,7 +761,7 @@ module Parser
           token(node.in_loc),
           pattern,
           guard,
-          srange_find(node.pattern.location.end_offset, node.statements&.location&.start_offset || node.location.end_offset, [";"]),
+          srange_find(node.pattern.location.end_offset, node.statements&.location&.start_offset || node.location.end_offset, [";", "then"]),
           visit(node.statements)
         )
       end
@@ -1318,7 +1322,7 @@ module Parser
         elsif context_destructure
           builder.restarg(token(node.operator_loc), token(node.expression&.location))
         elsif context_pattern
-          builder.match_rest(token(node.operator_loc), visit(node.expression))
+          builder.match_rest(token(node.operator_loc), token(node.expression&.location))
         else
           builder.splat(token(node.operator_loc), visit(node.expression))
         end

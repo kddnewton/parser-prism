@@ -5,7 +5,7 @@ require "rubocop"
 
 module Parser
   class Prism < Base
-    VERSION_3_3 = 89_65_82_80.33
+    VERSION_3_3 = 80_82_73_83_77.33
   end
 end
 
