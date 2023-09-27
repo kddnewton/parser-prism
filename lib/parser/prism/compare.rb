@@ -29,7 +29,7 @@ Parser::AST::Node.prepend(
 )
 
 module Parser
-  class YARP
+  class Prism
     # Compare the ASTs between the translator and the whitequark/parser gem.
     def self.compare(filepath, source = nil, compare_tokens: true)
       buffer = Source::Buffer.new(filepath, 1)
@@ -46,7 +46,7 @@ module Parser
           return true
         end
 
-      actual_ast, actual_comments, actual_tokens = YARP.new.tokenize(buffer)
+      actual_ast, actual_comments, actual_tokens = Prism.new.tokenize(buffer)
 
       if expected_ast != actual_ast
         puts filepath

@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 require "parser"
-require "yarp"
+require "prism"
 
 module Parser
-  class YARP < Base
+  class Prism < Base
     Racc_debug_parser = false
 
     def version
@@ -24,7 +24,7 @@ module Parser
     def parse(source_buffer)
       @source_buffer = source_buffer
 
-      build_ast(::YARP.parse(source_buffer.source, source_buffer.name).value)
+      build_ast(::Prism.parse(source_buffer.source, source_buffer.name).value)
     ensure
       @source_buffer = nil
     end
@@ -39,7 +39,7 @@ module Parser
     def parse_with_comments(source_buffer)
       @source_buffer = source_buffer
 
-      result = ::YARP.parse(source_buffer.source, source_buffer.name)
+      result = ::Prism.parse(source_buffer.source, source_buffer.name)
       [build_ast(result.value), build_comments(result.comments)]
     ensure
       @source_buffer = nil
@@ -55,7 +55,7 @@ module Parser
     def tokenize(source_buffer, _recover = false)
       @source_buffer = source_buffer
 
-      result = ::YARP.parse_lex(source_buffer.source, source_buffer.name)
+      result = ::Prism.parse_lex(source_buffer.source, source_buffer.name)
       program, tokens = result.value
 
       [build_ast(program), build_comments(result.comments), build_tokens(tokens)]
@@ -63,7 +63,7 @@ module Parser
       @source_buffer = nil
     end
 
-    # Since YARP resolves num params for us, we don't need to support this kind
+    # Since prism resolves num params for us, we don't need to support this kind
     # of logic here.
     def try_declare_numparam(node)
       node.children[0].match?(/\A_[1-9]\z/)
@@ -91,5 +91,5 @@ module Parser
   end
 end
 
-require_relative "yarp/compiler"
-require_relative "yarp/lexer"
+require_relative "prism/compiler"
+require_relative "prism/lexer"

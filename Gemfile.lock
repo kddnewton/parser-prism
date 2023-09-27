@@ -1,9 +1,14 @@
 PATH
+  remote: ../../ruby/prism
+  specs:
+    prism (0.12.0)
+
+PATH
   remote: .
   specs:
-    parser-yarp (0.1.0)
+    parser-prism (0.1.0)
       parser
-      yarp
+      prism
 
 GEM
   remote: https://rubygems.org/
@@ -41,14 +46,14 @@ GEM
     test-unit (3.6.1)
       power_assert
     unicode-display_width (2.4.2)
-    yarp (0.12.0)
 
 PLATFORMS
   arm64-darwin-22
 
 DEPENDENCIES
   benchmark-ips
-  parser-yarp!
+  parser-prism!
+  prism!
   rake
   rubocop
   test-unit

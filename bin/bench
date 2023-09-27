@@ -3,13 +3,13 @@
 
 require "bundler/setup"
 require "benchmark/ips"
-require "parser/yarp"
+require "parser/prism"
 require "parser/current"
 
-filepath = ARGV.fetch(0) { File.expand_path("../lib/parser/yarp/compiler.rb", __dir__) }
+filepath = ARGV.fetch(0) { File.expand_path("../lib/parser/prism/compiler.rb", __dir__) }
 
 Benchmark.ips do |x|
   x.report("Parser::CurrentRuby") { Parser::CurrentRuby.parse_file(filepath) }
-  x.report("Parser::YARP") { Parser::YARP.parse_file(filepath) }
+  x.report("Parser::Prism") { Parser::Prism.parse_file(filepath) }
   x.compare!
 end

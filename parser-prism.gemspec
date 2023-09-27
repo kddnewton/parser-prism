@@ -1,13 +1,13 @@
 # frozen_string_literal: true
 
 Gem::Specification.new do |spec|
-  spec.name = "parser-yarp"
+  spec.name = "parser-prism"
   spec.version = "0.1.0"
   spec.authors = ["Kevin Newton"]
   spec.email = ["kddnewton@gmail.com"]
 
-  spec.summary = "A YARP parser backend"
-  spec.homepage = "https://github.com/kddnewton/parser-yarp"
+  spec.summary = "A prism parser backend"
+  spec.homepage = "https://github.com/kddnewton/parser-prism"
   spec.license = "MIT"
 
   spec.files =
@@ -21,5 +21,5 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   spec.add_dependency "parser"
-  spec.add_dependency "yarp"
+  spec.add_dependency "prism"
 end

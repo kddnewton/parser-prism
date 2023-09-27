@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 module Parser
-  class YARP
-    class Compiler < ::YARP::BasicVisitor
+  class Prism
+    class Compiler < ::Prism::Compiler
       attr_reader :parser, :builder, :source_buffer
       attr_reader :context_locals, :context_destructure, :context_pattern
 
@@ -65,17 +65,17 @@ module Parser
       # { a: 1 }
       #   ^^^^
       def visit_assoc_node(node)
-        if node.value.is_a?(::YARP::ImplicitNode)
+        if node.value.is_a?(::Prism::ImplicitNode)
           builder.pair_label([node.key.slice.chomp(":"), srange(node.key.location)])
         elsif context_pattern && node.value.nil?
           builder.match_hash_var([node.key.unescaped, srange(node.key.location)])
         elsif node.operator_loc
           builder.pair(visit(node.key), token(node.operator_loc), visit(node.value))
-        elsif node.key.is_a?(::YARP::SymbolNode) && node.key.opening_loc.nil?
+        elsif node.key.is_a?(::Prism::SymbolNode) && node.key.opening_loc.nil?
           builder.pair_keyword([node.key.unescaped, srange(node.key.location)], visit(node.value))
         else
           parts =
-            if node.key.is_a?(::YARP::SymbolNode)
+            if node.key.is_a?(::Prism::SymbolNode)
               [builder.string_internal([node.key.unescaped, srange(node.key.value_loc)])]
             else
               visit_all(node,key.parts)
@@ -188,6 +188,14 @@ module Parser
       # foo.bar() {}
       # ^^^^^^^^^^^^
       def visit_call_node(node)
+        arguments = node.arguments&.arguments || []
+        block = node.block
+
+        if block.is_a?(::Prism::BlockArgumentNode)
+          arguments = [*arguments, block]
+          block = nil
+        end
+
         visit_block(
           if node.message == "not" || node.message == "!"
             builder.not_op(
@@ -200,10 +208,10 @@ module Parser
             builder.index(
               visit(node.receiver),
               token(node.opening_loc),
-              visit(node.arguments) || [],
+              visit_all(arguments),
               token(node.closing_loc)
             )
-          elsif node.name == "[]=" && node.message != "[]=" && node.arguments
+          elsif node.name == "[]=" && node.message != "[]=" && node.arguments && node.block.nil?
             builder.assign(
               builder.index_asgn(
                 visit(node.receiver),
@@ -214,7 +222,7 @@ module Parser
               srange_find(node.message_loc.end_offset, node.arguments.arguments.last.location.start_offset, ["="]),
               visit(node.arguments.arguments.last)
             )
-          elsif node.name.end_with?("=") && !node.message.end_with?("=") && node.arguments
+          elsif node.name.end_with?("=") && !node.message.end_with?("=") && node.arguments && node.block.nil?
             builder.assign(
               builder.attr_asgn(
                 visit(node.receiver),
@@ -230,11 +238,11 @@ module Parser
               node.call_operator_loc ? [{ "." => :dot, "&." => :anddot, "::" => "::" }.fetch(node.call_operator), srange(node.call_operator_loc)] : nil,
               node.message_loc ? [node.name, srange(node.message_loc)] : nil,
               token(node.opening_loc),
-              visit(node.arguments) || [],
+              visit_all(arguments),
               token(node.closing_loc)
             )
           end,
-          node.block
+          block
         )
       end
 
@@ -294,7 +302,7 @@ module Parser
       # ^^^^^^^^^^^^^^^^^^^^^
       def visit_case_node(node)
         builder.public_send(
-          node.conditions.first.is_a?(::YARP::WhenNode) ? :case : :case_match,
+          node.conditions.first.is_a?(::Prism::WhenNode) ? :case : :case_match,
           token(node.case_keyword_loc),
           visit(node.predicate),
           visit_all(node.conditions),
@@ -463,7 +471,7 @@ module Parser
           if node.receiver
             builder.def_endless_singleton(
               token(node.def_keyword_loc),
-              visit(node.receiver.is_a?(::YARP::ParenthesesNode) ? node.receiver.body : node.receiver),
+              visit(node.receiver.is_a?(::Prism::ParenthesesNode) ? node.receiver.body : node.receiver),
               token(node.operator_loc),
               token(node.name_loc),
               builder.args(token(node.lparen_loc), visit(node.parameters) || [], token(node.rparen_loc), false),
@@ -482,7 +490,7 @@ module Parser
         elsif node.receiver
           builder.def_singleton(
             token(node.def_keyword_loc),
-            visit(node.receiver.is_a?(::YARP::ParenthesesNode) ? node.receiver.body : node.receiver),
+            visit(node.receiver.is_a?(::Prism::ParenthesesNode) ? node.receiver.body : node.receiver),
             token(node.operator_loc),
             token(node.name_loc),
             builder.args(token(node.lparen_loc), visit(node.parameters) || [], token(node.rparen_loc), false),
@@ -697,9 +705,9 @@ module Parser
             srange_find(node.predicate.location.end_offset, (node.statements&.location || node.consequent&.location || node.end_keyword_loc).start_offset, [";", "then"]),
             visit(node.statements),
             case node.consequent
-            when ::YARP::IfNode
+            when ::Prism::IfNode
               token(node.consequent.if_keyword_loc)
-            when ::YARP::ElseNode
+            when ::Prism::ElseNode
               token(node.consequent.else_keyword_loc)
             end,
             visit(node.consequent),
@@ -735,10 +743,10 @@ module Parser
         guard = nil
 
         case node.pattern
-        when ::YARP::IfNode
+        when ::Prism::IfNode
           pattern = within_pattern { visit(node.pattern.statements) }
           guard = builder.if_guard(token(node.pattern.if_keyword_loc), visit(node.pattern.predicate))
-        when ::YARP::UnlessNode
+        when ::Prism::UnlessNode
           pattern = within_pattern { visit(node.pattern.statements) }
           guard = builder.unless_guard(token(node.pattern.keyword_loc), visit(node.pattern.predicate))
         else
@@ -1007,7 +1015,7 @@ module Parser
       # foo, bar = baz
       # ^^^^^^^^
       def visit_multi_target_node(node)
-        if node.targets.length == 1 || (node.targets.length == 2 && node.targets.last.is_a?(::YARP::SplatNode) && node.targets.last.operator == ",")
+        if node.targets.length == 1 || (node.targets.length == 2 && node.targets.last.is_a?(::Prism::SplatNode) && node.targets.last.operator == ",")
           visit(node.targets.first)
         else
           builder.multi_lhs(
@@ -1331,7 +1339,7 @@ module Parser
       # ^^^^^
       def visit_string_node(node)
         if node.opening&.start_with?("<<")
-          children, closing = visit_heredoc(::YARP::InterpolatedStringNode.new(node.opening_loc, [node.copy(opening_loc: nil, closing_loc: nil, location: node.content_loc)], node.closing_loc, node.location))
+          children, closing = visit_heredoc(::Prism::InterpolatedStringNode.new(node.opening_loc, [node.copy(opening_loc: nil, closing_loc: nil, location: node.content_loc)], node.closing_loc, node.location))
           builder.string_compose(token(node.opening_loc), children, closing)
         elsif node.opening == "?"
           builder.character([node.unescaped, srange(node.location)])
@@ -1347,15 +1355,23 @@ module Parser
       # super(foo)
       # ^^^^^^^^^^
       def visit_super_node(node)
+        arguments = node.arguments&.arguments || []
+        block = node.block
+
+        if block.is_a?(::Prism::BlockArgumentNode)
+          arguments = [*arguments, block]
+          block = nil
+        end
+
         visit_block(
           builder.keyword_cmd(
             :super,
             token(node.keyword_loc),
             token(node.lparen_loc),
-            node.arguments ? visit(node.arguments) : [],
+            visit_all(arguments),
             token(node.rparen_loc)
           ),
-          node.block
+          block
         )
       end
 
@@ -1480,7 +1496,7 @@ module Parser
       # ^^^^^
       def visit_x_string_node(node)
         if node.opening&.start_with?("<<")
-          children, closing = visit_heredoc(::YARP::InterpolatedXStringNode.new(node.opening_loc, [::YARP::StringNode.new(0, nil, node.content_loc, nil, node.unescaped, node.content_loc)], node.closing_loc, node.location))
+          children, closing = visit_heredoc(::Prism::InterpolatedXStringNode.new(node.opening_loc, [::Prism::StringNode.new(0, nil, node.content_loc, nil, node.unescaped, node.content_loc)], node.closing_loc, node.location))
           builder.xstring_compose(token(node.opening_loc), children, closing)
         else
           builder.xstring_compose(
@@ -1580,7 +1596,7 @@ module Parser
         children = []
         node.parts.each do |part|
           pushing =
-            if part.is_a?(::YARP::StringNode) && part.unescaped.count("\n") > 1
+            if part.is_a?(::Prism::StringNode) && part.unescaped.count("\n") > 1
               unescaped = part.unescaped.split("\n")
               escaped = part.content.split("\n")
 
@@ -1677,9 +1693,9 @@ end
 
 # Validate that the visitor has a visit method for each node type and only those
 # node types.
-expected = YARP.constants.grep(/.Node$/).map(&:name)
+expected = Prism.constants.grep(/.Node$/).map(&:name)
 actual =
-  Parser::YARP::Compiler.instance_methods(false).grep(/^visit_/).map do
+  Parser::Prism::Compiler.instance_methods(false).grep(/^visit_/).map do
     _1[6..].split("_").map(&:capitalize).join
   end
 

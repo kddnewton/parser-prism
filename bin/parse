@@ -4,20 +4,20 @@
 require "bundler/setup"
 $:.unshift(File.expand_path("../lib", __dir__))
 
-require "parser/yarp"
-require "parser/yarp/compare"
+require "parser/prism"
+require "parser/prism/compare"
 
 if ARGV[0].nil?
   filepaths = Dir[File.expand_path("../test/fixtures/*.rb", __dir__)]
   failures = 0
 
   filepaths.each do |filepath|
-    failures += 1 unless Parser::YARP.compare(filepath)
+    failures += 1 unless Parser::Prism.compare(filepath)
   end
 
   puts "#{filepaths.size - failures}/#{filepaths.size} tests passed"
 elsif ARGV[0] == "-e"
-  puts "match!" if Parser::YARP.compare("-e", ARGV[1])
+  puts "match!" if Parser::Prism.compare("-e", ARGV[1])
 else
-  puts "match!" if Parser::YARP.compare(ARGV[0])
+  puts "match!" if Parser::Prism.compare(ARGV[0])
 end

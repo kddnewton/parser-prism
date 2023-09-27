@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 module Parser
-  class YARP
-    # Accepts a list of YARP tokens and converts them into the expected format
+  class Prism
+    # Accepts a list of prism tokens and converts them into the expected format
     # for the parser gem.
     class Lexer
       TYPES = {
@@ -126,6 +126,7 @@ module Parser
         LESS_EQUAL_GREATER: :tCMP,
         LESS_LESS: :tLSHFT,
         LESS_LESS_EQUAL: :tOP_ASGN,
+        METHOD_NAME: :tFID,
         MINUS: :tMINUS,
         MINUS_EQUAL: :tOP_ASGN,
         MINUS_GREATER: :tLAMBDA,
@@ -215,8 +216,6 @@ module Parser
             end
           when :tNL
             value = nil
-          when :tIDENTIFIER
-            type = :tFID if value.end_with?("!")
           when :tFLOAT
             value = Float(value)
           when :tIMAGINARY
