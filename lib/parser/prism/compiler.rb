@@ -715,7 +715,7 @@ module Parser
               token(node.consequent.else_keyword_loc)
             end,
             visit(node.consequent),
-            if node.if_keyword != "elsif" || node.consequent&.statements.nil?
+            if node.if_keyword != "elsif"
               token(node.end_keyword_loc)
             end
           )
