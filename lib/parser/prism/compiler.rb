@@ -1336,7 +1336,16 @@ module Parser
       # "foo" "bar"
       # ^^^^^^^^^^^
       def visit_string_concat_node(node)
-        builder.word([visit(node.left), visit(node.right)])
+        left = visit(node.left)
+        right = visit(node.right)
+
+        if left.type == :dstr && left.children.all? { |c| c.type == :str }
+          children = left.children + [right]
+        else
+          children = [left, right]
+        end
+
+        builder.word(children)
       end
 
       # "foo"
