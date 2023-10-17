@@ -253,6 +253,9 @@ module Parser
               value = next_token.location.slice
               location = Source::Range.new(buffer, next_location.start_offset, next_location.end_offset)
               index += 2
+            elsif value.start_with?("<<")
+              quote = value[2] == "-" || value[2] == "~" ? value[3] : value[2]
+              value = "<<#{quote == "'" || quote == "\"" ? quote : "\""}"
             end
           when :tSTRING_DVAR
             value = nil

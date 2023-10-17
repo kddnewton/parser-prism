@@ -208,14 +208,14 @@ module Parser
               visit(node.receiver),
               token(node.closing_loc)
             )
-          elsif node.name == "[]"
+          elsif node.name == :[]
             builder.index(
               visit(node.receiver),
               token(node.opening_loc),
               visit_all(arguments),
               token(node.closing_loc)
             )
-          elsif node.name == "[]=" && node.message != "[]=" && node.arguments && node.block.nil?
+          elsif node.name == :[]= && node.message != "[]=" && node.arguments && node.block.nil?
             builder.assign(
               builder.index_asgn(
                 visit(node.receiver),
@@ -257,7 +257,7 @@ module Parser
       # ^^^^^^^^^^^^^^^
       def visit_call_operator_write_node(node)
         builder.op_assign(
-          if node.read_name == "[]"
+          if node.read_name == :[]
             builder.index(
               visit(node.receiver),
               token(node.opening_loc),

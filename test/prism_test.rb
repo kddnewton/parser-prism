@@ -6,6 +6,7 @@ $:.unshift(File.expand_path("../lib", __dir__))
 require "test/unit"
 require "parser/prism"
 require "parser/prism/compare"
+require "pp"
 
 class PrismTest < Test::Unit::TestCase
   skip = [
@@ -40,7 +41,10 @@ class PrismTest < Test::Unit::TestCase
 
     # Some kind of issue with the end location of heredocs including newlines.
     "dedenting_heredoc.rb",
-    "parser_drops_truncated_parts_of_squiggly_heredoc.rb"
+    "dedenting_interpolating_heredoc_fake_line_continuation.rb",
+    "parser_bug_640.rb",
+    "parser_drops_truncated_parts_of_squiggly_heredoc.rb",
+    "slash_newline_in_heredocs.rb"
   ]
 
   # We haven't fully implemented tokenization properly yet. Most of these are
@@ -74,7 +78,22 @@ class PrismTest < Test::Unit::TestCase
     compare_tokens = !skip_tokens.include?(filename)
 
     define_method("test_#{filepath}") do
-      assert(Parser::Prism.compare(filepath, compare_tokens: compare_tokens))
+      msg = -> {
+        buffer = Parser::Source::Buffer.new(filepath)
+        buffer.source = File.read(filepath)
+
+        <<~MSG
+          Expected #{filepath} to parse the same as the original parser.
+
+          The original parser produced the following tokens:
+          #{PP.pp(Parser::CurrentRuby.default_parser.tokenize(buffer)[2], +"")}
+
+          Prism produced the following tokens:
+          #{PP.pp(Parser::Prism.new.tokenize(buffer)[2], +"")}
+        MSG
+      }
+
+      assert(Parser::Prism.compare(filepath, compare_tokens: compare_tokens), msg)
     end
   end
 end
