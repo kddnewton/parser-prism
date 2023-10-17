@@ -75,6 +75,16 @@ module Parser
             return false
           end
 
+          if left.type == :str && left.children[0] != right.children[0]
+            puts "expected:"
+            pp left
+
+            puts "actual:"
+            pp right
+
+            return false
+          end
+
           left.children.zip(right.children).each do |left_child, right_child|
             queue << [left_child, right_child] if left_child.is_a?(Parser::AST::Node)
           end
