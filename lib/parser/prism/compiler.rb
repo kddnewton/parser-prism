@@ -913,6 +913,9 @@ module Parser
               token(node.parameters.closing_loc),
               false
             )
+          elsif node.locals.any? { |local| local.match?(/^_\d$/) }
+            max_numparam = node.locals.map { |local| local[/\d+/].to_i }.max
+            builder.numargs(max_numparam)
           else
             builder.args(nil, [], nil, false)
           end,
@@ -1582,22 +1585,27 @@ module Parser
         if block
           builder.block(
             call,
-            [block.opening, srange(block.opening_loc)],
-            builder.args(
-              token(block.parameters&.opening_loc),
-              if block.parameters.nil?
-                []
-              elsif procarg0?(block.parameters.parameters)
-                parameter = block.parameters.parameters.requireds.first
-                [builder.procarg0(visit(parameter))].concat(visit_all(block.parameters.locals))
-              else
-                visit(block.parameters)
-              end,
-              token(block.parameters&.closing_loc),
-              false
-            ),
+            token(block.opening_loc),
+            if block.locals.any? { |local| local.match?(/^_\d$/) }
+              max_numparam = block.locals.map { |local| local[/\d+/].to_i }.max
+              builder.numargs(max_numparam)
+            else
+              builder.args(
+                token(block.parameters&.opening_loc),
+                if block.parameters.nil?
+                  []
+                elsif procarg0?(block.parameters.parameters)
+                  parameter = block.parameters.parameters.requireds.first
+                  [builder.procarg0(visit(parameter))].concat(visit_all(block.parameters.locals))
+                else
+                  visit(block.parameters)
+                end,
+                token(block.parameters&.closing_loc),
+                false
+              )
+            end,
             visit(block.body),
-            [block.closing, srange(block.closing_loc)]
+            token(block.closing_loc)
           )
         else
           call

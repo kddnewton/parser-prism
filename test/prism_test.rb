@@ -22,10 +22,6 @@ class PrismTest < Test::Unit::TestCase
     "parser_slash_slash_n_escaping_in_literals.rb",
     "ruby_bug_11989.rb",
 
-    # We don't yet support numbered parameters. This is a bug in prism.
-    "numbered_args_after_27.rb",
-    "ruby_bug_15789.rb",
-
     # We have an issue here with rescue modifier precedence. This is a bug in
     # prism.
     "endless_method_command_syntax.rb",
