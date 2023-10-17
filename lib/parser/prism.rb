@@ -75,7 +75,7 @@ module Parser
     private
 
     def build_ast(program)
-      program.accept(Compiler.new(self))
+      program.accept(Compiler.new(self, offset_cache))
     end
 
     def build_comments(comments)
@@ -89,7 +89,13 @@ module Parser
     end
 
     def build_tokens(tokens)
-      Lexer.new(source_buffer, tokens.map(&:first)).to_a
+      Lexer.new(source_buffer, tokens.map(&:first), offset_cache).to_a
+    end
+
+    def offset_cache
+      @offset_cache ||= Hash.new do |h, k|
+        h[k] = @source_buffer.source.byteslice(0, k).length
+      end
     end
   end
 end

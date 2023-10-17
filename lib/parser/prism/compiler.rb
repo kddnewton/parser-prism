@@ -3,13 +3,14 @@
 module Parser
   class Prism
     class Compiler < ::Prism::Compiler
-      attr_reader :parser, :builder, :source_buffer
+      attr_reader :parser, :builder, :source_buffer, :offset_cache
       attr_reader :locals, :in_destructure, :in_pattern
 
-      def initialize(parser, locals: nil, in_destructure: false, in_pattern: false)
+      def initialize(parser, offset_cache, locals: nil, in_destructure: false, in_pattern: false)
         @parser = parser
         @builder = parser.builder
         @source_buffer = parser.source_buffer
+        @offset_cache = offset_cache
 
         @locals = locals
         @in_destructure = in_destructure
@@ -1558,7 +1559,7 @@ module Parser
       private
 
       def copy_compiler(locals: self.locals, in_destructure: self.in_destructure, in_pattern: self.in_pattern)
-        Compiler.new(parser, locals: locals, in_destructure: in_destructure, in_pattern: in_pattern)
+        Compiler.new(parser, offset_cache, locals: locals, in_destructure: in_destructure, in_pattern: in_pattern)
       end
 
       # Blocks can have a special set of parameters that automatically expand
@@ -1577,12 +1578,12 @@ module Parser
 
       # Constructs a new source range from the given start and end offsets.
       def srange(location)
-        Source::Range.new(source_buffer, location.start_offset, location.end_offset) if location
+        Source::Range.new(source_buffer, offset_cache[location.start_offset], offset_cache[location.end_offset]) if location
       end
 
       # Constructs a new source range from the given start and end offsets.
       def srange_offsets(start_offset, end_offset)
-        Source::Range.new(source_buffer, start_offset, end_offset)
+        Source::Range.new(source_buffer, offset_cache[start_offset], offset_cache[end_offset])
       end
 
       # Constructs a new source range by finding the given tokens between the
@@ -1592,13 +1593,13 @@ module Parser
         tokens.find do |token|
           next unless (index = source_buffer.source.byteslice(start_offset...end_offset).index(token))
           offset = start_offset + index
-          return [token, Source::Range.new(source_buffer, offset, offset + token.length)]
+          return [token, Source::Range.new(source_buffer, offset_cache[offset], offset_cache[offset + token.length])]
         end
       end
 
       # Transform a location into a token that the parser gem expects.
       def token(location)
-        [location.slice, Source::Range.new(source_buffer, location.start_offset, location.end_offset)] if location
+        [location.slice, Source::Range.new(source_buffer, offset_cache[location.start_offset], offset_cache[location.end_offset])] if location
       end
 
       # Visit a block node on a call.
