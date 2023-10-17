@@ -17,6 +17,10 @@ class PrismTest < Test::Unit::TestCase
     "range_endless.rb",
     "unary_num_pow_precedence.rb",
 
+    # These parse differently from MRI with the parser gem, so nothing we can do
+    # about that.
+    "dedenting_interpolating_heredoc_fake_line_continuation.rb",
+
     # This is some kind of difference between when we combine dstr into str
     # sexps on escaped newlines.
     "parser_slash_slash_n_escaping_in_literals.rb",
@@ -37,7 +41,6 @@ class PrismTest < Test::Unit::TestCase
 
     # Some kind of issue with the end location of heredocs including newlines.
     "dedenting_heredoc.rb",
-    "dedenting_interpolating_heredoc_fake_line_continuation.rb",
     "parser_bug_640.rb",
     "parser_drops_truncated_parts_of_squiggly_heredoc.rb",
     "slash_newline_in_heredocs.rb"
@@ -52,18 +55,13 @@ class PrismTest < Test::Unit::TestCase
     "beginless_range.rb",
     "bug_ascii_8bit_in_literal.rb",
     "bug_heredoc_do.rb",
-    "dedenting_interpolating_heredoc_fake_line_continuation.rb",
     "dedenting_non_interpolating_heredoc_line_continuation.rb",
     "forward_arg_with_open_args.rb",
     "heredoc.rb",
     "interp_digit_var.rb",
     "multiple_pattern_matches.rb",
-    "newline_in_hash_argument.rb",
-    "parser_bug_640.rb",
-    "parser_drops_truncated_parts_of_squiggly_heredoc.rb",
     "ruby_bug_11990.rb",
-    "ruby_bug_9669.rb",
-    "slash_newline_in_heredocs.rb"
+    "ruby_bug_9669.rb"
   ]
 
   base = File.expand_path("fixtures", __dir__)
