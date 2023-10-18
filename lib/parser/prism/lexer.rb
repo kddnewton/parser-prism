@@ -272,6 +272,10 @@ module Parser
               location = Source::Range.new(buffer, next_location.start_offset, next_location.end_offset)
               index += 1
             end
+          when :tFID
+            if tokens[-1][0] == :kDEF
+              type = :tIDENTIFIER
+            end
           end
   
           tokens << [type, [value, location]]
