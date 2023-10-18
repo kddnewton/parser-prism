@@ -265,7 +265,7 @@ module Parser
               location = Source::Range.new(buffer, token.location.start_offset, token.location.start_offset + 1)
             end
           when :tSYMBEG
-            if (next_token = lexed[index]) && next_token.type == :IDENTIFIER
+            if (next_token = lexed[index]) && next_token.type != :STRING_CONTENT
               next_location = token.location.join(next_token.location)
               type = :tSYMBOL
               value = next_token.location.slice
