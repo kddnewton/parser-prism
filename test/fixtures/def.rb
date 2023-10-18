@@ -9,3 +9,7 @@ def String=; end
 def foo; end
 
 def until; end
+
+def foo?; end
+
+def foo!; end
