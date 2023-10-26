@@ -4,16 +4,16 @@ module Parser
   class Prism
     class Compiler < ::Prism::Compiler
       attr_reader :parser, :builder, :source_buffer
-      attr_reader :context_locals, :context_destructure, :context_pattern
+      attr_reader :locals, :in_destructure, :in_pattern
 
-      def initialize(parser)
+      def initialize(parser, locals: nil, in_destructure: false, in_pattern: false)
         @parser = parser
         @builder = parser.builder
         @source_buffer = parser.source_buffer
 
-        @context_locals = nil
-        @context_destructure = false
-        @context_pattern = false
+        @locals = locals
+        @in_destructure = in_destructure
+        @in_pattern = in_pattern
       end
 
       # alias foo bar
@@ -67,7 +67,7 @@ module Parser
       def visit_assoc_node(node)
         if node.value.is_a?(::Prism::ImplicitNode)
           builder.pair_label([node.key.slice.chomp(":"), srange(node.key.location)])
-        elsif context_pattern && node.value.nil?
+        elsif in_pattern && node.value.nil?
           if node.key.is_a?(::Prism::SymbolNode)
             builder.match_hash_var([node.key.unescaped, srange(node.key.location)])
           else
@@ -95,7 +95,7 @@ module Parser
       # { **foo }
       #   ^^^^^
       def visit_assoc_splat_node(node)
-        if node.value.nil? && context_locals.include?(:**)
+        if node.value.nil? && locals.include?(:**)
           builder.forwarded_kwrestarg(token(node.operator_loc))
         else
           builder.kwsplat(token(node.operator_loc), visit(node.value))
@@ -306,7 +306,7 @@ module Parser
           visit(node.constant_path),
           token(node.inheritance_operator_loc),
           visit(node.superclass),
-          with_locals(node.locals) { visit(node.body) },
+          node.body&.accept(copy_compiler(locals: node.locals)),
           token(node.end_keyword_loc)
         )
       end
@@ -462,7 +462,7 @@ module Parser
               token(node.name_loc),
               builder.args(token(node.lparen_loc), visit(node.parameters) || [], token(node.rparen_loc), false),
               token(node.equal_loc),
-              with_locals(node.locals) { visit(node.body) }
+              node.body&.accept(copy_compiler(locals: node.locals))
             )
           else
             builder.def_endless_method(
@@ -470,7 +470,7 @@ module Parser
               token(node.name_loc),
               builder.args(token(node.lparen_loc), visit(node.parameters) || [], token(node.rparen_loc), false),
               token(node.equal_loc),
-              with_locals(node.locals) { visit(node.body) }
+              node.body&.accept(copy_compiler(locals: node.locals))
             )
           end
         elsif node.receiver
@@ -480,7 +480,7 @@ module Parser
             token(node.operator_loc),
             token(node.name_loc),
             builder.args(token(node.lparen_loc), visit(node.parameters) || [], token(node.rparen_loc), false),
-            with_locals(node.locals) { visit(node.body) },
+            node.body&.accept(copy_compiler(locals: node.locals)),
             token(node.end_keyword_loc)
           )
         else
@@ -488,7 +488,7 @@ module Parser
             token(node.def_keyword_loc),
             token(node.name_loc),
             builder.args(token(node.lparen_loc), visit(node.parameters) || [], token(node.rparen_loc), false),
-            with_locals(node.locals) { visit(node.body) },
+            node.body&.accept(copy_compiler(locals: node.locals)),
             token(node.end_keyword_loc)
           )
         end
@@ -730,13 +730,13 @@ module Parser
 
         case node.pattern
         when ::Prism::IfNode
-          pattern = within_pattern { visit(node.pattern.statements) }
+          pattern = within_pattern { |compiler| node.pattern.statements.accept(compiler) }
           guard = builder.if_guard(token(node.pattern.if_keyword_loc), visit(node.pattern.predicate))
         when ::Prism::UnlessNode
-          pattern = within_pattern { visit(node.pattern.statements) }
+          pattern = within_pattern { |compiler| node.pattern.statements.accept(compiler) }
           guard = builder.unless_guard(token(node.pattern.keyword_loc), visit(node.pattern.predicate))
         else
-          pattern = within_pattern { visit(node.pattern) }
+          pattern = within_pattern { |compiler| node.pattern.accept(compiler) }
         end
 
         builder.in_pattern(
@@ -927,7 +927,7 @@ module Parser
           else
             builder.args(nil, [], nil, false)
           end,
-          with_locals(node.locals) { visit(node.body) },
+          node.body&.accept(copy_compiler(locals: node.locals)),
           [node.closing, srange(node.closing_loc)]
         )
       end
@@ -972,7 +972,7 @@ module Parser
       # foo, = bar
       # ^^^
       def visit_local_variable_target_node(node)
-        if context_pattern
+        if in_pattern
           builder.assignable(builder.match_var([node.name, srange(node.location)]))
         else
           builder.assignable(builder.ident(token(node.location)))
@@ -985,7 +985,7 @@ module Parser
         builder.match_pattern_p(
           visit(node.value),
           token(node.operator_loc),
-          within_pattern { visit(node.pattern) }
+          within_pattern { |compiler| node.pattern.accept(compiler) }
         )
       end
 
@@ -995,7 +995,7 @@ module Parser
         builder.match_pattern(
           visit(node.value),
           token(node.operator_loc),
-          within_pattern { visit(node.pattern) }
+          within_pattern { |compiler| node.pattern.accept(compiler) }
         )
       end
 
@@ -1022,7 +1022,7 @@ module Parser
         builder.def_module(
           token(node.module_keyword_loc),
           visit(node.constant_path),
-          with_locals(node.locals) { visit(node.body) },
+          node.body&.accept(copy_compiler(locals: node.locals)),
           token(node.end_keyword_loc)
         )
       end
@@ -1161,7 +1161,7 @@ module Parser
 
       # The top-level program node.
       def visit_program_node(node)
-        with_locals(node.locals) { builder.compstmt(visit_all(node.statements.body)) }
+        node.statements.accept(copy_compiler(locals: node.locals))
       end
 
       # 0..5
@@ -1216,9 +1216,11 @@ module Parser
       # def foo((bar)); end
       #         ^^^^^
       def visit_required_destructured_parameter_node(node)
+        compiler = copy_compiler(in_destructure: true)
+
         builder.multi_lhs(
           token(node.opening_loc),
-          within_destructure { visit_all(node.parameters) },
+          node.parameters.map { |parameter| parameter.accept(compiler) },
           token(node.closing_loc)
         )
       end
@@ -1296,7 +1298,7 @@ module Parser
           token(node.class_keyword_loc),
           token(node.operator_loc),
           visit(node.expression),
-          with_locals(node.locals) { visit(node.body) },
+          node.body.accept(copy_compiler(locals: node.locals)),
           token(node.end_keyword_loc)
         )
       end
@@ -1328,11 +1330,11 @@ module Parser
       # def foo(*); bar(*); end
       #                 ^
       def visit_splat_node(node)
-        if node.expression.nil? && context_locals.include?(:*)
+        if node.expression.nil? && locals.include?(:*)
           builder.forwarded_restarg(token(node.operator_loc))
-        elsif context_destructure
+        elsif in_destructure
           builder.restarg(token(node.operator_loc), token(node.expression&.location))
-        elsif context_pattern
+        elsif in_pattern
           builder.match_rest(token(node.operator_loc), token(node.expression&.location))
         else
           builder.splat(token(node.operator_loc), visit(node.expression))
@@ -1548,6 +1550,10 @@ module Parser
 
       private
 
+      def copy_compiler(locals: self.locals, in_destructure: self.in_destructure, in_pattern: self.in_pattern)
+        Compiler.new(parser, locals: locals, in_destructure: in_destructure, in_pattern: in_pattern)
+      end
+
       # Blocks can have a special set of parameters that automatically expand
       # when given arrays if they have a single required parameter and no other
       # parameters.
@@ -1679,40 +1685,12 @@ module Parser
         end
       end
 
-      # Within the given block, use the given set of context_locals.
-      def with_locals(locals)
-        previous = @context_locals
-        @context_locals = locals
-
-        begin
-          yield
-        ensure
-          @context_locals = previous
-        end
-      end
-
-      # Within the given block, track that we're within a destructure.
-      def within_destructure
-        previous = @context_destructure
-        @context_destructure = true
-
-        begin
-          yield
-        ensure
-          @context_destructure = previous
-        end
-      end
-
       # Within the given block, track that we're within a pattern.
       def within_pattern
-        previous = @context_pattern
-        @context_pattern = true
-
         begin
           parser.pattern_variables.push
-          yield
+          yield copy_compiler(in_pattern: true)
         ensure
-          @context_pattern = previous
           parser.pattern_variables.pop
         end
       end
