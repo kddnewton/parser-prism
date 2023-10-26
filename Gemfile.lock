@@ -1,9 +1,4 @@
 PATH
-  remote: ../../ruby/prism
-  specs:
-    prism (0.15.1)
-
-PATH
   remote: .
   specs:
     parser-prism (0.1.0)
@@ -22,6 +17,7 @@ GEM
       ast (~> 2.4.1)
       racc
     power_assert (2.0.3)
+    prism (0.15.1)
     racc (1.7.1)
     rainbow (3.1.1)
     rake (13.0.6)
@@ -47,14 +43,15 @@ GEM
 
 PLATFORMS
   arm64-darwin-22
+  x86_64-linux
 
 DEPENDENCIES
   benchmark-ips
   parser-prism!
-  prism!
+  prism
   rake
   rubocop
   test-unit
 
 BUNDLED WITH
-   2.4.12
+   2.4.13
