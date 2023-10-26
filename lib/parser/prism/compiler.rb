@@ -252,28 +252,16 @@ module Parser
 
       # foo.bar += baz
       # ^^^^^^^^^^^^^^^
-      #
-      # foo[bar] += baz
-      # ^^^^^^^^^^^^^^^
       def visit_call_operator_write_node(node)
         builder.op_assign(
-          if node.read_name == :[]
-            builder.index(
-              visit(node.receiver),
-              token(node.opening_loc),
-              visit(node.arguments) || [],
-              token(node.closing_loc)
-            )
-          else
-            builder.call_method(
-              visit(node.receiver),
-              node.call_operator_loc ? [{ "." => :dot, "&." => :anddot, "::" => "::" }.fetch(node.call_operator), srange(node.call_operator_loc)] : nil,
-              node.message_loc ? [node.read_name, srange(node.message_loc)] : nil,
-              token(node.opening_loc),
-              visit(node.arguments) || [],
-              token(node.closing_loc)
-            )
-          end,
+          builder.call_method(
+            visit(node.receiver),
+            node.call_operator_loc ? [{ "." => :dot, "&." => :anddot, "::" => "::" }.fetch(node.call_operator), srange(node.call_operator_loc)] : nil,
+            node.message_loc ? [node.read_name, srange(node.message_loc)] : nil,
+            nil,
+            [],
+            nil
+          ),
           [node.operator_loc.slice.chomp("="), srange(node.operator_loc)],
           visit(node.value)
         )
@@ -281,16 +269,10 @@ module Parser
 
       # foo.bar &&= baz
       # ^^^^^^^^^^^^^^^
-      #
-      # foo[bar] &&= baz
-      # ^^^^^^^^^^^^^^^^
       alias visit_call_and_write_node visit_call_operator_write_node
 
       # foo.bar ||= baz
       # ^^^^^^^^^^^^^^^
-      #
-      # foo[bar] ||= baz
-      # ^^^^^^^^^^^^^^^^
       alias visit_call_or_write_node visit_call_operator_write_node
 
       # foo => bar => baz
@@ -765,6 +747,32 @@ module Parser
           visit(node.statements)
         )
       end
+
+      # foo[bar] += baz
+      # ^^^^^^^^^^^^^^^
+      def visit_index_operator_write_node(node)
+        arguments = node.arguments&.arguments || []
+        arguments << node.block if node.block
+
+        builder.op_assign(
+          builder.index(
+            visit(node.receiver),
+            token(node.opening_loc),
+            visit_all(arguments),
+            token(node.closing_loc)
+          ),
+          [node.operator_loc.slice.chomp("="), srange(node.operator_loc)],
+          visit(node.value)
+        )
+      end
+
+      # foo[bar] &&= baz
+      # ^^^^^^^^^^^^^^^^
+      alias visit_index_and_write_node visit_index_operator_write_node
+
+      # foo[bar] ||= baz
+      # ^^^^^^^^^^^^^^^^
+      alias visit_index_or_write_node visit_index_operator_write_node
 
       # @foo
       # ^^^^
