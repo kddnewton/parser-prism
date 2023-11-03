@@ -661,9 +661,9 @@ module Parser
       #        ^^
       def visit_hash_pattern_node(node)
         if node.constant
-          builder.const_pattern(visit(node.constant), token(node.opening_loc), builder.hash_pattern(nil, visit_all(node.assocs), nil), token(node.closing_loc))
+          builder.const_pattern(visit(node.constant), token(node.opening_loc), builder.hash_pattern(nil, visit_all(node.elements), nil), token(node.closing_loc))
         else
-          builder.hash_pattern(token(node.opening_loc), visit_all(node.assocs), token(node.closing_loc))
+          builder.hash_pattern(token(node.opening_loc), visit_all(node.elements), token(node.closing_loc))
         end
       end
 
@@ -884,19 +884,6 @@ module Parser
         builder.associate(nil, visit_all(node.elements), nil)
       end
 
-      # def foo(bar:); end
-      #         ^^^^
-      #
-      # def foo(bar: baz); end
-      #         ^^^^^^^^
-      def visit_keyword_parameter_node(node)
-        if node.value
-          builder.kwoptarg([node.name, srange(node.name_loc)], visit(node.value))
-        else
-          builder.kwarg([node.name, srange(node.name_loc)])
-        end
-      end
-
       # def foo(**bar); end
       #         ^^^^^
       #
@@ -1030,15 +1017,13 @@ module Parser
       # foo, bar = baz
       # ^^^^^^^^
       def visit_multi_target_node(node)
-        if node.targets.length == 1 || (node.targets.length == 2 && node.targets.last.is_a?(::Prism::SplatNode) && node.targets.last.operator == ",")
-          visit(node.targets.first)
-        else
-          builder.multi_lhs(
-            token(node.lparen_loc),
-            visit_all(node.targets),
-            token(node.rparen_loc)
-          )
-        end
+        node = node.copy(rest: nil) if node.rest&.operator == ","
+
+        builder.multi_lhs(
+          token(node.lparen_loc),
+          visit_all([*node.lefts, *node.rest, *node.rights]),
+          token(node.rparen_loc)
+        )
       end
 
       # foo, bar = baz
@@ -1047,7 +1032,7 @@ module Parser
         builder.multi_assign(
           builder.multi_lhs(
             token(node.lparen_loc),
-            visit_all(node.targets),
+            visit_all([*node.lefts, *node.rest, *node.rights]),
             token(node.rparen_loc)
           ),
           token(node.operator_loc),
@@ -1088,6 +1073,12 @@ module Parser
         builder.nth_ref([node.number, srange(node.location)])
       end
 
+      # def foo(bar: baz); end
+      #         ^^^^^^^^
+      def visit_optional_keyword_parameter_node(node)
+        builder.kwoptarg([node.name, srange(node.name_loc)], visit(node.value))
+      end
+
       # def foo(bar = 1); end
       #         ^^^^^^^
       def visit_optional_parameter_node(node)
@@ -1104,10 +1095,32 @@ module Parser
       #         ^^^^^^^^^
       def visit_parameters_node(node)
         params = []
-        params.concat(visit_all(node.requireds)) if node.requireds.any?
+
+        if node.requireds.any?
+          node.requireds.each do |required|
+            if required.is_a?(::Prism::RequiredParameterNode)
+              params << visit(required)
+            else
+              compiler = copy_compiler(in_destructure: true)
+              params << required.accept(compiler)
+            end
+          end
+        end
+
         params.concat(visit_all(node.optionals)) if node.optionals.any?
         params << visit(node.rest) if !node.rest.nil? && node.rest.operator != ","
-        params.concat(visit_all(node.posts)) if node.posts.any?
+
+        if node.posts.any?
+          node.posts.each do |post|
+            if post.is_a?(::Prism::RequiredParameterNode)
+              params << visit(post)
+            else
+              compiler = copy_compiler(in_destructure: true)
+              params << post.accept(compiler)
+            end
+          end
+        end
+
         params.concat(visit_all(node.keywords)) if node.keywords.any?
         params << visit(node.keyword_rest) if !node.keyword_rest.nil?
         params << visit(node.block) if !node.block.nil?
@@ -1213,16 +1226,10 @@ module Parser
       #    ^^^^^
       alias visit_match_last_line_node visit_regular_expression_node
 
-      # def foo((bar)); end
-      #         ^^^^^
-      def visit_required_destructured_parameter_node(node)
-        compiler = copy_compiler(in_destructure: true)
-
-        builder.multi_lhs(
-          token(node.opening_loc),
-          node.parameters.map { |parameter| parameter.accept(compiler) },
-          token(node.closing_loc)
-        )
+      # def foo(bar:); end
+      #         ^^^^
+      def visit_required_keyword_parameter_node(node)
+        builder.kwarg([node.name, srange(node.name_loc)])
       end
 
       # def foo(bar); end

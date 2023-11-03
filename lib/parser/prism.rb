@@ -58,7 +58,7 @@ module Parser
     def tokenize(source_buffer, _recover = false)
       @source_buffer = source_buffer
 
-      result = ::Prism.parse_lex(source_buffer.source, source_buffer.name)
+      result = ::Prism.parse_lex(source_buffer.source, filepath: source_buffer.name)
       program, tokens = result.value
 
       [build_ast(program), build_comments(result.comments), build_tokens(tokens)]
@@ -80,7 +80,7 @@ module Parser
 
     def build_comments(comments)
       comments.each_with_object([]) do |comment, result|
-        next if comment.type == :__END__
+        next if comment.is_a?(::Prism::DATAComment)
 
         location = comment.location
         range = Source::Range.new(source_buffer, location.start_offset, location.end_offset)

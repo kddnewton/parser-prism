@@ -11,10 +11,7 @@ require "pp"
 class PrismTest < Test::Unit::TestCase
   skip = [
     # These files contain invalid syntax. We should never try to parse them.
-    "control_meta_escape_chars_in_regexp__since_31.rb",
     "newline_in_hash_argument.rb",
-    "pattern_match.rb",
-    "range_endless.rb",
     "unary_num_pow_precedence.rb",
 
     # These parse differently from MRI with the parser gem, so nothing we can do
@@ -31,19 +28,15 @@ class PrismTest < Test::Unit::TestCase
     "endless_method_command_syntax.rb",
     "ruby_bug_12402.rb",
 
-    # These are location bounds issues. They are bugs in translation, but not
-    # bugs in prism.
-    "bug_rescue_empty_else.rb",
-    "ensure_empty.rb",
-    "rescue_else.rb",
-    "rescue_else_ensure.rb",
-    "rescue_in_lambda_block.rb",
-
     # Some kind of issue with the end location of heredocs including newlines.
     "dedenting_heredoc.rb",
     "parser_bug_640.rb",
     "parser_drops_truncated_parts_of_squiggly_heredoc.rb",
-    "slash_newline_in_heredocs.rb"
+    "slash_newline_in_heredocs.rb",
+
+    # Unclear what to do here when you have nesting, it appears that the parser
+    # gem is just skipping some levels.
+    "masgn_nested.rb"
   ]
 
   # We haven't fully implemented tokenization properly yet. Most of these are
