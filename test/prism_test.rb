@@ -23,11 +23,6 @@ class PrismTest < Test::Unit::TestCase
     "parser_slash_slash_n_escaping_in_literals.rb",
     "ruby_bug_11989.rb",
 
-    # We have an issue here with rescue modifier precedence. This is a bug in
-    # prism.
-    "endless_method_command_syntax.rb",
-    "ruby_bug_12402.rb",
-
     # Some kind of issue with the end location of heredocs including newlines.
     "dedenting_heredoc.rb",
     "parser_bug_640.rb",

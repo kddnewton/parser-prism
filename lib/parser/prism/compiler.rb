@@ -283,12 +283,21 @@ module Parser
 
       # case foo; when bar; end
       # ^^^^^^^^^^^^^^^^^^^^^^^
-      #
+      def visit_case_node(node)
+        builder.case(
+          token(node.case_keyword_loc),
+          visit(node.predicate),
+          visit_all(node.conditions),
+          token(node.consequent&.else_keyword_loc),
+          visit(node.consequent),
+          token(node.end_keyword_loc)
+        )
+      end
+
       # case foo; in bar; end
       # ^^^^^^^^^^^^^^^^^^^^^
-      def visit_case_node(node)
-        builder.public_send(
-          node.conditions.first.is_a?(::Prism::WhenNode) ? :case : :case_match,
+      def visit_case_match_node(node)
+        builder.case_match(
           token(node.case_keyword_loc),
           visit(node.predicate),
           visit_all(node.conditions),
@@ -679,7 +688,7 @@ module Parser
         if !node.if_keyword_loc
           builder.ternary(
             visit(node.predicate),
-            srange_find(node.predicate.location.end_offset, node.statements.location.start_offset, ["?"]),
+            token(node.then_keyword_loc),
             visit(node.statements),
             token(node.consequent.else_keyword_loc),
             visit(node.consequent)
@@ -688,7 +697,11 @@ module Parser
           builder.condition(
             token(node.if_keyword_loc),
             visit(node.predicate),
-            srange_find(node.predicate.location.end_offset, (node.statements&.location || node.consequent&.location || node.end_keyword_loc).start_offset, [";", "then"]),
+            if node.then_keyword_loc
+              token(node.then_keyword_loc)
+            else
+              srange_find(node.predicate.location.end_offset, (node.statements&.location || node.consequent&.location || node.end_keyword_loc).start_offset, [";"])
+            end,
             visit(node.statements),
             case node.consequent
             when ::Prism::IfNode
@@ -1353,21 +1366,6 @@ module Parser
         builder.compstmt(visit_all(node.body))
       end
 
-      # "foo" "bar"
-      # ^^^^^^^^^^^
-      def visit_string_concat_node(node)
-        left = visit(node.left)
-        right = visit(node.right)
-
-        if left.type == :dstr && left.children.all? { |c| c.type == :str }
-          children = left.children + [right]
-        else
-          children = [left, right]
-        end
-
-        builder.word(children)
-      end
-
       # "foo"
       # ^^^^^
       def visit_string_node(node)
@@ -1448,7 +1446,11 @@ module Parser
           builder.condition(
             token(node.keyword_loc),
             visit(node.predicate),
-            srange_find(node.predicate.location.end_offset, (node.statements&.location || node.consequent&.location || node.end_keyword_loc).start_offset, [";", "then"]),
+            if node.then_keyword_loc
+              token(node.then_keyword_loc)
+            else
+              srange_find(node.predicate.location.end_offset, (node.statements&.location || node.consequent&.location || node.end_keyword_loc).start_offset, [";"])
+            end,
             visit(node.consequent),
             token(node.consequent&.else_keyword_loc),
             visit(node.statements),
