@@ -177,11 +177,12 @@ module Parser
   
       private_constant :TYPES
 
-      attr_reader :buffer, :lexed
+      attr_reader :buffer, :lexed, :offset_cache
 
-      def initialize(buffer, lexed)
+      def initialize(buffer, lexed, offset_cache)
         @buffer = buffer
         @lexed = lexed
+        @offset_cache = offset_cache
       end
 
       def to_a
@@ -195,7 +196,7 @@ module Parser
   
           type = TYPES.fetch(token.type)
           value = token.value
-          location = Source::Range.new(buffer, token.location.start_offset, token.location.end_offset)
+          location = Source::Range.new(buffer, offset_cache[token.location.start_offset], offset_cache[token.location.end_offset])
   
           case type
           when :tCHARACTER
@@ -203,16 +204,16 @@ module Parser
           when :tCOMMENT
             if token.type == :EMBDOC_BEGIN
               until (next_token = lexed[index]) && next_token.type == :EMBDOC_END
-                value += next_token.location.slice
+                value += next_token.value
                 index += 1
               end
   
-              value += lexed[index].location.slice
-              location = Source::Range.new(buffer, token.location.start_offset, lexed[index].location.end_offset)
+              value += next_token.value
+              location = Source::Range.new(buffer, offset_cache[token.location.start_offset], offset_cache[lexed[index].location.end_offset])
               index += 1
             else
               value.chomp!
-              location = Source::Range.new(buffer, token.location.start_offset, token.location.end_offset - 1)
+              location = Source::Range.new(buffer, offset_cache[token.location.start_offset], offset_cache[token.location.end_offset - 1])
             end
           when :tNL
             value = nil
@@ -223,7 +224,7 @@ module Parser
             value = Complex(0, value.end_with?("r") ? Rational(value.chomp("r")) : value)
           when :tINTEGER
             if value.start_with?("+")
-              tokens << [:tUNARY_NUM, ["+", Source::Range.new(buffer, token.location.start_offset, token.location.start_offset + 1)]]
+              tokens << [:tUNARY_NUM, ["+", Source::Range.new(buffer, offset_cache[token.location.start_offset], offset_cache[token.location.start_offset + 1])]]
               location = Source::Range.new(buffer, token.location.start_offset + 1, token.location.end_offset)
             end
   
@@ -245,13 +246,13 @@ module Parser
               next_location = token.location.join(next_token.location)
               type = :tSTRING
               value = ""
-              location = Source::Range.new(buffer, next_location.start_offset, next_location.end_offset)
+              location = Source::Range.new(buffer, offset_cache[next_location.start_offset], offset_cache[next_location.end_offset])
               index += 1
             elsif ["\"", "'"].include?(value) && (next_token = lexed[index]) && next_token.type == :STRING_CONTENT && (next_next_token = lexed[index + 1]) && next_next_token.type == :STRING_END
               next_location = token.location.join(next_next_token.location)
               type = :tSTRING
-              value = next_token.location.slice
-              location = Source::Range.new(buffer, next_location.start_offset, next_location.end_offset)
+              value = next_token.value
+              location = Source::Range.new(buffer, offset_cache[next_location.start_offset], offset_cache[next_location.end_offset])
               index += 2
             elsif value.start_with?("<<")
               quote = value[2] == "-" || value[2] == "~" ? value[3] : value[2]
@@ -262,13 +263,13 @@ module Parser
           when :tSTRING_END
             if token.type == :REGEXP_END
               value = value[0]
-              location = Source::Range.new(buffer, token.location.start_offset, token.location.start_offset + 1)
+              location = Source::Range.new(buffer, offset_cache[token.location.start_offset], offset_cache[token.location.start_offset + 1])
             end
           when :tSYMBEG
             if (next_token = lexed[index]) && next_token.type != :STRING_CONTENT
               next_location = token.location.join(next_token.location)
               type = :tSYMBOL
-              value = next_token.location.slice
+              value = next_token.value
               location = Source::Range.new(buffer, next_location.start_offset, next_location.end_offset)
               index += 1
             end
@@ -281,7 +282,7 @@ module Parser
           tokens << [type, [value, location]]
   
           if token.type == :REGEXP_END
-            tokens << [:tREGEXP_OPT, [token.location.slice[1..], Source::Range.new(buffer, token.location.start_offset + 1, token.location.end_offset)]]
+            tokens << [:tREGEXP_OPT, [token.value[1..], Source::Range.new(buffer, offset_cache[token.location.start_offset + 1], offset_cache[token.location.end_offset])]]
           end
         end
 
