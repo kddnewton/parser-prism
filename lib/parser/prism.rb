@@ -27,7 +27,7 @@ module Parser
     def parse(source_buffer)
       @source_buffer = source_buffer
 
-      build_ast(::Prism.parse(source_buffer.source, source_buffer.name).value)
+      build_ast(::Prism.parse(source_buffer.source).value)
     ensure
       @source_buffer = nil
     end
@@ -42,7 +42,7 @@ module Parser
     def parse_with_comments(source_buffer)
       @source_buffer = source_buffer
 
-      result = ::Prism.parse(source_buffer.source, source_buffer.name)
+      result = ::Prism.parse(source_buffer.source)
       [build_ast(result.value), build_comments(result.comments)]
     ensure
       @source_buffer = nil
