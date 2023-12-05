@@ -71,6 +71,8 @@ module Parser
         elsif in_pattern && node.value.nil?
           if node.key.is_a?(::Prism::SymbolNode)
             builder.match_hash_var([node.key.unescaped, srange(node.key.location)])
+          elsif node.key.is_a?(::Prism::MissingNode)
+            visit_missing_node(node)
           else
             builder.match_hash_var_from_str(token(node.key.opening_loc), visit_all(node.key.parts), token(node.key.closing_loc))
           end
@@ -82,8 +84,10 @@ module Parser
           parts =
             if node.key.is_a?(::Prism::SymbolNode)
               [builder.string_internal([node.key.unescaped, srange(node.key.value_loc)])]
-            else
+            elsif node.key.respond_to?(:parts)
               visit_all(node.key.parts)
+            else
+              visit_missing_node(node)
             end
 
           builder.pair_quoted(token(node.key.opening_loc), parts, token(node.key.closing_loc), visit(node.value))
@@ -1014,7 +1018,7 @@ module Parser
       # case of a syntax error. The parser gem doesn't have such a concept, so
       # we invent our own here.
       def visit_missing_node(node)
-        raise "Cannot compile missing nodes"
+        raise ::SyntaxError, "unexpected node"
       end
 
       # module Foo; end
