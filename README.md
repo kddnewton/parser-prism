@@ -1,6 +1,6 @@
 # parser-prism
 
-This is an early experiment in building the [whitequark/parser](https://github.com/whitequark/parser) gem's syntax tree using the [prism](https://github.com/ruby/prism) parser.
+This gem provides a new backend for the [whitequark/parser](https://github.com/whitequark/parser) gem's syntax tree that uses the [prism](https://github.com/ruby/prism) parser.
 
 ## Installation
 
@@ -85,7 +85,7 @@ These benchmarks were run on a single laptop without a lot of control for other 
 
 ## Development
 
-Run `rake test` to run the tests. This runs tests exported from the `parser` gem into their own fixture files.
+Run `bundle exec rake test` to run the tests. This runs tests exported from the `parser` gem into their own fixture files.
 
 ## Contributing
 
