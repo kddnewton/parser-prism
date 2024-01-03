@@ -201,22 +201,25 @@ module Parser
           block = nil
         end
 
+        message = node.message
+        name = node.name
+
         visit_block(
-          if node.message == "not" || node.message == "!"
+          if message == "not" || message == "!"
             builder.not_op(
               token(node.message_loc),
               token(node.opening_loc),
               visit(node.receiver),
               token(node.closing_loc)
             )
-          elsif node.name == :[]
+          elsif name == :[]
             builder.index(
               visit(node.receiver),
               token(node.opening_loc),
               visit_all(arguments),
               token(node.closing_loc)
             )
-          elsif node.name == :[]= && node.message != "[]=" && node.arguments && node.block.nil?
+          elsif name == :[]= && message != "[]=" && node.arguments && block.nil?
             builder.assign(
               builder.index_asgn(
                 visit(node.receiver),
@@ -227,25 +230,27 @@ module Parser
               srange_find(node.message_loc.end_offset, node.arguments.arguments.last.location.start_offset, ["="]),
               visit(node.arguments.arguments.last)
             )
-          elsif node.name.end_with?("=") && !node.message.end_with?("=") && node.arguments && node.block.nil?
-            builder.assign(
-              builder.attr_asgn(
-                visit(node.receiver),
-                node.call_operator_loc ? [{ "." => :dot, "&." => :anddot, "::" => "::" }.fetch(node.call_operator), srange(node.call_operator_loc)] : nil,
-                token(node.message_loc)
-              ),
-              srange_find(node.message_loc.end_offset, node.arguments.location.start_offset, ["="]),
-              visit(node.arguments.arguments.last)
-            )
           else
-            builder.call_method(
-              visit(node.receiver),
-              node.call_operator_loc ? [{ "." => :dot, "&." => :anddot, "::" => "::" }.fetch(node.call_operator), srange(node.call_operator_loc)] : nil,
-              node.message_loc ? [node.name, srange(node.message_loc)] : nil,
-              token(node.opening_loc),
-              visit_all(arguments),
-              token(node.closing_loc)
-            )
+            message_loc = node.message_loc
+            call_operator_loc = node.call_operator_loc
+            call_operator = [{ "." => :dot, "&." => :anddot, "::" => "::" }.fetch(call_operator_loc.slice), srange(call_operator_loc)] if call_operator_loc
+
+            if name.end_with?("=") && !message.end_with?("=") && node.arguments && block.nil?
+              builder.assign(
+                builder.attr_asgn(visit(node.receiver), call_operator, token(message_loc)),
+                srange_find(message_loc.end_offset, node.arguments.location.start_offset, ["="]),
+                visit(node.arguments.arguments.last)
+              )
+            else
+              builder.call_method(
+                visit(node.receiver),
+                call_operator,
+                message_loc ? [node.name, srange(message_loc)] : nil,
+                token(node.opening_loc),
+                visit_all(arguments),
+                token(node.closing_loc)
+              )
+            end
           end,
           block
         )
@@ -254,10 +259,12 @@ module Parser
       # foo.bar += baz
       # ^^^^^^^^^^^^^^^
       def visit_call_operator_write_node(node)
+        call_operator_loc = node.call_operator_loc
+
         builder.op_assign(
           builder.call_method(
             visit(node.receiver),
-            node.call_operator_loc ? [{ "." => :dot, "&." => :anddot, "::" => "::" }.fetch(node.call_operator), srange(node.call_operator_loc)] : nil,
+            call_operator_loc.nil? ? nil : [{ "." => :dot, "&." => :anddot, "::" => "::" }.fetch(call_operator_loc.slice), srange(call_operator_loc)],
             node.message_loc ? [node.read_name, srange(node.message_loc)] : nil,
             nil,
             [],
@@ -275,6 +282,18 @@ module Parser
       # foo.bar ||= baz
       # ^^^^^^^^^^^^^^^
       alias visit_call_or_write_node visit_call_operator_write_node
+
+      # foo.bar, = 1
+      # ^^^^^^^
+      def visit_call_target_node(node)
+        call_operator_loc = node.call_operator_loc
+
+        builder.attr_asgn(
+          visit(node.receiver),
+          call_operator_loc.nil? ? nil : [{ "." => :dot, "&." => :anddot, "::" => "::" }.fetch(call_operator_loc.slice), srange(call_operator_loc)],
+          token(node.message_loc)
+        )
+      end
 
       # foo => bar => baz
       #        ^^^^^^^^^^
@@ -736,6 +755,12 @@ module Parser
         raise "Cannot directly compile implicit nodes"
       end
 
+      # foo { |bar,| }
+      #           ^
+      def visit_implicit_rest_node(node)
+        raise "Cannot directly compile implicit rest nodes"
+      end
+
       # case foo; in bar; end
       # ^^^^^^^^^^^^^^^^^^^^^
       def visit_in_node(node)
@@ -787,6 +812,17 @@ module Parser
       # foo[bar] ||= baz
       # ^^^^^^^^^^^^^^^^
       alias visit_index_or_write_node visit_index_operator_write_node
+
+      # foo[bar], = 1
+      # ^^^^^^^^
+      def visit_index_target_node(node)
+        builder.index_asgn(
+          visit(node.receiver),
+          token(node.opening_loc),
+          visit_all(node.arguments.arguments),
+          token(node.closing_loc),
+        )
+      end
 
       # @foo
       # ^^^^
@@ -916,15 +952,16 @@ module Parser
           builder.call_lambda(token(node.operator_loc)),
           [node.opening, srange(node.opening_loc)],
           if node.parameters
-            builder.args(
-              token(node.parameters.opening_loc),
-              visit(node.parameters),
-              token(node.parameters.closing_loc),
-              false
-            )
-          elsif node.locals.any? { |local| local.match?(/^_\d$/) }
-            max_numparam = node.locals.map { |local| local[/\d+/].to_i }.max
-            builder.numargs(max_numparam)
+            if node.parameters.is_a?(::Prism::NumberedParametersNode)
+              visit(node.parameters)
+            else
+              builder.args(
+                token(node.parameters.opening_loc),
+                visit(node.parameters),
+                token(node.parameters.closing_loc),
+                false
+              )
+            end
           else
             builder.args(nil, [], nil, false)
           end,
@@ -1031,7 +1068,7 @@ module Parser
       # foo, bar = baz
       # ^^^^^^^^
       def visit_multi_target_node(node)
-        node = node.copy(rest: nil) if node.rest&.operator == ","
+        node = node.copy(rest: nil) if node.rest.is_a?(::Prism::ImplicitRestNode)
 
         builder.multi_lhs(
           token(node.lparen_loc),
@@ -1081,6 +1118,12 @@ module Parser
         builder.kwnilarg(token(node.operator_loc), token(node.keyword_loc))
       end
 
+      # -> { _1 + _2 }
+      # ^^^^^^^^^^^^^^
+      def visit_numbered_parameters_node(node)
+        builder.numargs(node.maximum)
+      end
+
       # $1
       # ^^
       def visit_numbered_reference_read_node(node)
@@ -1122,7 +1165,7 @@ module Parser
         end
 
         params.concat(visit_all(node.optionals)) if node.optionals.any?
-        params << visit(node.rest) if !node.rest.nil? && node.rest.operator != ","
+        params << visit(node.rest) if !node.rest.nil? && !node.rest.is_a?(::Prism::ImplicitRestNode)
 
         if node.posts.any?
           node.posts.each do |post|
@@ -1610,23 +1653,24 @@ module Parser
           builder.block(
             call,
             token(block.opening_loc),
-            if block.locals.any? { |local| local.match?(/^_\d$/) }
-              max_numparam = block.locals.map { |local| local[/\d+/].to_i }.max
-              builder.numargs(max_numparam)
+            if (parameters = block.parameters)
+              if parameters.is_a?(::Prism::NumberedParametersNode)
+                visit(parameters)
+              else
+                builder.args(
+                  token(parameters.opening_loc),
+                  if procarg0?(parameters.parameters)
+                    parameter = parameters.parameters.requireds.first
+                    [builder.procarg0(visit(parameter))].concat(visit_all(parameters.locals))
+                  else
+                    visit(parameters)
+                  end,
+                  token(parameters.closing_loc),
+                  false
+                )
+              end
             else
-              builder.args(
-                token(block.parameters&.opening_loc),
-                if block.parameters.nil?
-                  []
-                elsif procarg0?(block.parameters.parameters)
-                  parameter = block.parameters.parameters.requireds.first
-                  [builder.procarg0(visit(parameter))].concat(visit_all(block.parameters.locals))
-                else
-                  visit(block.parameters)
-                end,
-                token(block.parameters&.closing_loc),
-                false
-              )
+              builder.args(nil, [], nil, false)
             end,
             visit(block.body),
             token(block.closing_loc)
@@ -1706,20 +1750,4 @@ module Parser
       end
     end
   end
-end
-
-# Validate that the visitor has a visit method for each node type and only those
-# node types.
-expected = Prism.constants.grep(/.Node$/).map(&:name)
-actual =
-  Parser::Prism::Compiler.instance_methods(false).grep(/^visit_/).map do
-    _1[6..].split("_").map(&:capitalize).join
-  end
-
-if (extra = actual - expected).any?
-  raise "Unexpected visit methods for: #{extra.join(", ")}"
-end
-
-if (missing = expected - actual).any?
-  raise "Missing visit methods for: #{missing.join(", ")}"
 end

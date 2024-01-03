@@ -78,4 +78,15 @@ class PrismTest < Test::Unit::TestCase
       assert(Parser::Prism.compare(filepath, compare_tokens: compare_tokens), msg)
     end
   end
+
+  def test_visit_methods
+    expected = Prism.constants.grep(/.Node$/).map(&:name)
+    actual =
+      Parser::Prism::Compiler.instance_methods(false).grep(/^visit_/).map do |method|
+        method.name.delete_prefix("visit_").split("_").map(&:capitalize).join
+      end
+
+    assert_empty(actual - expected, -> { "Unexpected visit methods for: #{(actual - expected).join(", ")}" })
+    assert_empty(expected - actual, -> { "Missing visit methods for: #{(expected - actual).join(", ")}" })
+  end
 end

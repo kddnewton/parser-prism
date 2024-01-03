@@ -27,7 +27,7 @@ module Parser
     def parse(source_buffer)
       @source_buffer = source_buffer
 
-      build_ast(::Prism.parse(source_buffer.source, source_buffer.name).value)
+      build_ast(::Prism.parse(source_buffer.source, filepath: source_buffer.name).value)
     ensure
       @source_buffer = nil
     end
@@ -42,7 +42,7 @@ module Parser
     def parse_with_comments(source_buffer)
       @source_buffer = source_buffer
 
-      result = ::Prism.parse(source_buffer.source, source_buffer.name)
+      result = ::Prism.parse(source_buffer.source, filepath: source_buffer.name)
       [build_ast(result.value), build_comments(result.comments)]
     ensure
       @source_buffer = nil
@@ -79,12 +79,9 @@ module Parser
     end
 
     def build_comments(comments)
-      comments.each_with_object([]) do |comment, result|
-        next if comment.is_a?(::Prism::DATAComment)
-
+      comments.map do |comment|
         location = comment.location
-        range = Source::Range.new(source_buffer, location.start_offset, location.end_offset)
-        result << Source::Comment.new(range)
+        Source::Comment.new(Source::Range.new(source_buffer, location.start_offset, location.end_offset))
       end
     end
 

@@ -17,7 +17,7 @@ GEM
       ast (~> 2.4.1)
       racc
     power_assert (2.0.3)
-    prism (0.18.0)
+    prism (0.19.0)
     racc (1.7.3)
     rainbow (3.1.1)
     rake (13.1.0)
