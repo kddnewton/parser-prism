@@ -26,8 +26,12 @@ module Parser
     #
     def parse(source_buffer)
       @source_buffer = source_buffer
+      source = source_buffer.source
 
-      build_ast(::Prism.parse(source_buffer.source, filepath: source_buffer.name).value)
+      offset_cache = build_offset_cache(source)
+      result = ::Prism.parse(source, filepath: source_buffer.name).value
+
+      build_ast(result, offset_cache)
     ensure
       @source_buffer = nil
     end
@@ -41,9 +45,12 @@ module Parser
     #
     def parse_with_comments(source_buffer)
       @source_buffer = source_buffer
+      source = source_buffer.source
 
-      result = ::Prism.parse(source_buffer.source, filepath: source_buffer.name)
-      [build_ast(result.value), build_comments(result.comments)]
+      offset_cache = build_offset_cache(source)
+      result = ::Prism.parse(source, filepath: source_buffer.name)
+
+      [build_ast(result.value, offset_cache), build_comments(result.comments)]
     ensure
       @source_buffer = nil
     end
@@ -57,11 +64,13 @@ module Parser
     #
     def tokenize(source_buffer, _recover = false)
       @source_buffer = source_buffer
+      souce = source_buffer.source
 
-      result = ::Prism.parse_lex(source_buffer.source, filepath: source_buffer.name)
+      offset_cache = build_offset_cache(source)
+      result = ::Prism.parse_lex(source, filepath: source_buffer.name)
+
       program, tokens = result.value
-
-      [build_ast(program), build_comments(result.comments), build_tokens(tokens)]
+      [build_ast(program, offset_cache), build_comments(result.comments), build_tokens(tokens, offset_cache)]
     ensure
       @source_buffer = nil
     end
@@ -74,7 +83,15 @@ module Parser
 
     private
 
-    def build_ast(program)
+    def build_offset_cache(source)
+      if source.bytesize == source.length
+        -> (offset) { offset }
+      else
+        Hash.new { |hash, offset| hash[offset] = source.byteslice(0, offset).length }
+      end
+    end
+
+    def build_ast(program, offset_cache)
       program.accept(Compiler.new(self, offset_cache))
     end
 
@@ -85,14 +102,8 @@ module Parser
       end
     end
 
-    def build_tokens(tokens)
+    def build_tokens(tokens, offset_cache)
       Lexer.new(source_buffer, tokens.map(&:first), offset_cache).to_a
-    end
-
-    def offset_cache
-      @offset_cache ||= Hash.new do |h, k|
-        h[k] = @source_buffer.source.byteslice(0, k).length
-      end
     end
   end
 end
