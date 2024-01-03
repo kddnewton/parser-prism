@@ -2,6 +2,9 @@
 
 module Prism
   class ParserCompiler < Compiler
+    class CompilationError < StandardError
+    end
+
     attr_reader :parser, :builder, :source_buffer, :offset_cache
     attr_reader :locals, :in_destructure, :in_pattern
 
@@ -160,7 +163,7 @@ module Prism
 
     # A block on a keyword or method call.
     def visit_block_node(node)
-      raise "Cannot directly compile block nodes"
+      raise CompilationError, "Cannot directly compile block nodes"
     end
 
     # def foo(&bar); end
@@ -560,7 +563,7 @@ module Prism
     # begin; foo; ensure; bar; end
     #             ^^^^^^^^^^^^
     def visit_ensure_node(node)
-      raise "Cannot directly compile ensure nodes"
+      raise CompilationError, "Cannot directly compile ensure nodes"
     end
 
     # false
@@ -686,10 +689,12 @@ module Prism
     # foo => {}
     #        ^^
     def visit_hash_pattern_node(node)
+      elements = [*node.elements, *node.rest]
+
       if node.constant
-        builder.const_pattern(visit(node.constant), token(node.opening_loc), builder.hash_pattern(nil, visit_all(node.elements), nil), token(node.closing_loc))
+        builder.const_pattern(visit(node.constant), token(node.opening_loc), builder.hash_pattern(nil, visit_all(elements), nil), token(node.closing_loc))
       else
-        builder.hash_pattern(token(node.opening_loc), visit_all(node.elements), token(node.closing_loc))
+        builder.hash_pattern(token(node.opening_loc), visit_all(elements), token(node.closing_loc))
       end
     end
 
@@ -749,13 +754,13 @@ module Prism
     # { foo: }
     #   ^^^^
     def visit_implicit_node(node)
-      raise "Cannot directly compile implicit nodes"
+      raise CompilationError, "Cannot directly compile implicit nodes"
     end
 
     # foo { |bar,| }
     #           ^
     def visit_implicit_rest_node(node)
-      raise "Cannot directly compile implicit rest nodes"
+      raise CompilationError, "Cannot compile implicit rest nodes"
     end
 
     # case foo; in bar; end
@@ -1048,7 +1053,7 @@ module Prism
     # case of a syntax error. The parser gem doesn't have such a concept, so
     # we invent our own here.
     def visit_missing_node(node)
-      raise "Cannot compile missing nodes"
+      raise CompilationError, "Cannot compile missing nodes"
     end
 
     # module Foo; end
@@ -1112,7 +1117,11 @@ module Prism
     # def foo(**nil); end
     #         ^^^^^
     def visit_no_keywords_parameter_node(node)
-      builder.kwnilarg(token(node.operator_loc), token(node.keyword_loc))
+      if in_pattern
+        builder.match_nil_pattern(token(node.operator_loc), token(node.keyword_loc))
+      else
+        builder.kwnilarg(token(node.operator_loc), token(node.keyword_loc))
+      end
     end
 
     # -> { _1 + _2 }
@@ -1313,7 +1322,7 @@ module Prism
     # begin; rescue; end
     #        ^^^^^^^
     def visit_rescue_node(node)
-      raise "Cannot directly compile rescue nodes"
+      raise CompilationError, "Cannot directly compile rescue nodes"
     end
 
     # def foo(*bar); end
