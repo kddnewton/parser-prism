@@ -1082,6 +1082,8 @@ module Prism
     # foo, bar = baz
     # ^^^^^^^^^^^^^^
     def visit_multi_write_node(node)
+      node = node.copy(rest: nil) if node.rest.is_a?(ImplicitRestNode)
+
       builder.multi_assign(
         builder.multi_lhs(
           token(node.lparen_loc),
@@ -1368,7 +1370,7 @@ module Prism
         token(node.class_keyword_loc),
         token(node.operator_loc),
         visit(node.expression),
-        node.body.accept(copy_compiler(locals: node.locals)),
+        node.body&.accept(copy_compiler(locals: node.locals)),
         token(node.end_keyword_loc)
       )
     end
@@ -1732,7 +1734,7 @@ module Prism
       end
 
       closing = node.closing
-      closing_t = [closing.chomp, srange_offsets(node.closing_loc.start_offset, node.closing_loc.end_offset - closing[/\s+$/].length)]
+      closing_t = [closing.chomp, srange_offsets(node.closing_loc.start_offset, node.closing_loc.end_offset - (closing[/\s+$/]&.length || 0))]
 
       [children, closing_t]
     end

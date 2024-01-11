@@ -220,12 +220,11 @@ module Parser
           when :tFLOAT
             value = Float(value)
           when :tIMAGINARY
-            value.chomp!("i")
-            value = Complex(0, value.end_with?("r") ? Rational(value.chomp("r")) : value)
+            value = parse_complex(value)
           when :tINTEGER
             if value.start_with?("+")
               tokens << [:tUNARY_NUM, ["+", Source::Range.new(buffer, offset_cache[token.location.start_offset], offset_cache[token.location.start_offset + 1])]]
-              location = Source::Range.new(buffer, token.location.start_offset + 1, token.location.end_offset)
+              location = Source::Range.new(buffer, offset_cache[token.location.start_offset + 1], offset_cache[token.location.end_offset])
             end
   
             value = Integer(value)
@@ -238,7 +237,7 @@ module Parser
           when :tOP_ASGN
             value.chomp!("=")
           when :tRATIONAL
-            value = Rational(value.chomp("r"))
+            value = parse_rational(value)
           when :tSPACE
             value = nil
           when :tSTRING_BEG
@@ -266,11 +265,12 @@ module Parser
               location = Source::Range.new(buffer, offset_cache[token.location.start_offset], offset_cache[token.location.start_offset + 1])
             end
           when :tSYMBEG
-            if (next_token = lexed[index]) && next_token.type != :STRING_CONTENT
+            if (next_token = lexed[index]) && next_token.type != :STRING_CONTENT && next_token.type != :EMBEXPR_BEGIN && next_token.type != :EMBVAR
               next_location = token.location.join(next_token.location)
               type = :tSYMBOL
               value = next_token.value
-              location = Source::Range.new(buffer, next_location.start_offset, next_location.end_offset)
+              value = { "~@" => "~", "!@" => "!" }.fetch(value, value)
+              location = Source::Range.new(buffer, offset_cache[next_location.start_offset], offset_cache[next_location.end_offset])
               index += 1
             end
           when :tFID
@@ -287,6 +287,30 @@ module Parser
         end
 
         tokens
+      end
+
+      private
+
+      def parse_complex(value)
+        value.chomp!("i")
+
+        if value.end_with?("r")
+          Complex(0, parse_rational(value))
+        elsif value.start_with?(/0[BbOoDdXx]/)
+          Complex(0, Integer(value))
+        else
+          Complex(0, value)
+        end
+      end
+
+      def parse_rational(value)
+        value.chomp!("r")
+
+        if value.start_with?(/0[BbOoDdXx]/)
+          Rational(Integer(value))
+        else
+          Rational(value)
+        end
       end
     end
   end

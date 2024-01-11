@@ -90,6 +90,12 @@ module Parser
           end
         end
 
+        puts "expected:"
+        pp expected_ast
+
+        puts "actual:"
+        pp actual_ast
+
         return false
       end
 
