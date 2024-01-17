@@ -657,7 +657,7 @@ module Prism
     def visit_global_variable_operator_write_node(node)
       builder.op_assign(
         builder.assignable(builder.gvar(token(node.name_loc))),
-        [node.operator, srange(node.operator_loc)],
+        [node.operator_loc.slice.chomp("="), srange(node.operator_loc)],
         visit(node.value)
       )
     end
