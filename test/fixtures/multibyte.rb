@@ -1,5 +1,7 @@
 # credits to https://github.com/minimaxir/big-list-of-naughty-strings/blob/master/blns.txt
 
+# 🥲
+
 a = "😍"
 b = "👩🏽"
 c = "👨‍🦰 👨🏿‍🦰 👨‍🦱 👨🏿‍🦱 🦹🏿‍♂️"
