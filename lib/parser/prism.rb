@@ -74,7 +74,7 @@ module Parser
 
       [
         build_ast(program, offset_cache),
-        build_comments(result.comments),
+        build_comments(result.comments, offset_cache),
         build_tokens(tokens, offset_cache)
       ]
     ensure
@@ -110,10 +110,10 @@ module Parser
     end
 
     # Build the parser gem comments from the prism comments.
-    def build_comments(comments)
+    def build_comments(comments, offset_cache)
       comments.map do |comment|
         location = comment.location
-        Source::Comment.new(Source::Range.new(source_buffer, location.start_offset, location.end_offset))
+        Source::Comment.new(Source::Range.new(source_buffer, offset_cache[location.start_offset], offset_cache[location.end_offset]))
       end
     end
 
