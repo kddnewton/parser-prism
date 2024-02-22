@@ -1,3 +1,5 @@
+> :warning: **Deprecated**: Please use [prism](https://github.com/ruby/prism) directly.
+
 # parser-prism
 
 This gem provides a new backend for the [whitequark/parser](https://github.com/whitequark/parser) gem's syntax tree that uses the [prism](https://github.com/ruby/prism) parser.
