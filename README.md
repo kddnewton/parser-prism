@@ -1,4 +1,4 @@
-> :warning: **Deprecated**: Please use [prism](https://github.com/ruby/prism) directly.
+> :warning: Moved: The translation from Prism AST to parser gem AST moved to the [prism](https://github.com/ruby/prism) gem as Prism::Translation::Parser.
 
 # parser-prism
 
